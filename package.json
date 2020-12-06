@@ -1,0 +1,61 @@
+{
+  "name": "pixi-matter",
+  "version": "0.1.0",
+  "description": "Easily create pixi sprites and graphics objects with matter physics bodies",
+  "main": "index.js",
+  "module": "pixi-matter.js",
+  "typings": "lib/index.ts",
+  "scripts": {
+    "rm:build": "rm -rf lib",
+    "rm:bundle": "rm -rf pixi-matter.js",
+    "type-check": "tsc --noEmit",
+    "type-check:watch": "npm run type-check -- --watch",
+    "build": "npm run rm:build && npm run build:types && npm run build:js",
+    "build:types": "tsc --emitDeclarationOnly",
+    "build:js": "babel src --out-dir lib --extensions \".ts,.tsx\" --source-maps inline",
+    "bundle": "npm run rm:bundle && rollup -c",
+    "bundle:watch": "rollup -c --watch",
+    "examples": "node examples/server.js",
+    "prepare": "npm run build && npm run bundle"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:robertcorponoi/pixi-matter.git"
+  },
+  "keywords": [
+    "pixi",
+    "pixi.js",
+    "matter",
+    "matter-js",
+    "physics",
+    "sprite",
+    "sprites",
+    "graphics"
+  ],
+  "author": "Robert Corponoi",
+  "license": "MIT",
+  "devDependencies": {
+    "@babel/cli": "^7.12.8",
+    "@babel/core": "^7.12.9",
+    "@babel/plugin-proposal-class-properties": "^7.12.1",
+    "@babel/plugin-proposal-numeric-separator": "^7.12.7",
+    "@babel/plugin-proposal-object-rest-spread": "^7.12.1",
+    "@babel/preset-env": "^7.12.7",
+    "@babel/preset-typescript": "^7.12.7",
+    "@rollup/plugin-babel": "^5.2.2",
+    "@rollup/plugin-commonjs": "^17.0.0",
+    "@rollup/plugin-node-resolve": "^11.0.0",
+    "@types/matter-js": "^0.14.7",
+    "fastify": "^3.9.1",
+    "fastify-static": "^3.3.0",
+    "rollup": "^2.34.1",
+    "typescript": "^4.1.2"
+  },
+  "dependencies": {
+    "@pixi/core": "^5.3.3",
+    "@pixi/graphics": "^5.3.3",
+    "@pixi/sprite": "^5.3.3",
+    "matter-js": "^0.14.2",
+    "pixi.js": "^5.3.3"
+  }
+}
