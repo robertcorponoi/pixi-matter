@@ -1,14 +1,16 @@
-'use strict'
+"use strict";
 
-const path = require('path');
-const fastify = require('fastify')({ logger: false });
+const path = require("path");
+const fastify = require("fastify")({ logger: false });
 
 // Set fastify-static to serve everything in the test folder.
-fastify.register(require('fastify-static'), { root: path.resolve(__dirname, '..') });
+fastify.register(require("@fastify/static"), {
+  root: path.resolve(__dirname, ".."),
+});
 
 // Set the home page to serve the index.html file.
-fastify.get('/', function (req, reply) {
-  return reply.sendFile('examples/index.html');
+fastify.get("/", function (req, reply) {
+  return reply.sendFile("examples/index.html");
 });
 
 // Have the server listen on port 3000.

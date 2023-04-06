@@ -13,8 +13,8 @@
     "build": "npm run rm:build && npm run build:types && npm run build:js",
     "build:types": "tsc --emitDeclarationOnly",
     "build:js": "babel src --out-dir lib --extensions \".ts,.tsx\" --source-maps inline",
-    "bundle": "npm run rm:bundle && rollup -c",
-    "bundle:watch": "rollup -c --watch",
+    "bundle": "npm run rm:bundle && rollup -c --bundleConfigAsCjs",
+    "bundle:watch": "rollup -c --bundleConfigAsCjs --watch",
     "examples": "node examples/server.js",
     "prepare": "npm run build && npm run bundle"
   },
@@ -42,20 +42,20 @@
     "@babel/plugin-proposal-object-rest-spread": "^7.12.1",
     "@babel/preset-env": "^7.12.7",
     "@babel/preset-typescript": "^7.12.7",
-    "@rollup/plugin-babel": "^5.2.2",
-    "@rollup/plugin-commonjs": "^17.0.0",
-    "@rollup/plugin-node-resolve": "^11.0.0",
-    "@types/matter-js": "^0.14.7",
-    "fastify": "^3.9.1",
-    "fastify-static": "^3.3.0",
-    "rollup": "^2.34.1",
-    "typescript": "^4.1.2"
+    "@fastify/static": "^6.10.0",
+    "@rollup/plugin-babel": "^6.0.3",
+    "@rollup/plugin-commonjs": "^24.0.1",
+    "@rollup/plugin-node-resolve": "^15.0.2",
+    "@types/matter-js": "^0.18.2",
+    "fastify": "^4.15.0",
+    "rollup": "^3.20.2",
+    "typescript": "^5.0.3"
   },
   "dependencies": {
-    "@pixi/core": "^5.3.3",
-    "@pixi/graphics": "^5.3.3",
-    "@pixi/sprite": "^5.3.3",
-    "matter-js": "^0.14.2",
-    "pixi.js": "^5.3.3"
+    "@pixi/core": "^7.2.4",
+    "@pixi/graphics": "^7.2.4",
+    "@pixi/sprite": "^7.2.4",
+    "matter-js": "^0.19.0",
+    "pixi.js": "^7.2.4"
   }
 }
