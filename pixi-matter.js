@@ -13946,6 +13946,388 @@ const url = {
   resolve: resolve
 };
 
+function assertPath(path2) {
+  if (typeof path2 !== "string") {
+    throw new TypeError(`Path must be a string. Received ${JSON.stringify(path2)}`);
+  }
+}
+function removeUrlParams(url) {
+  const re = url.split("?")[0];
+  return re.split("#")[0];
+}
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function replaceAll(str, find, replace) {
+  return str.replace(new RegExp(escapeRegExp(find), "g"), replace);
+}
+function normalizeStringPosix(path2, allowAboveRoot) {
+  let res = "";
+  let lastSegmentLength = 0;
+  let lastSlash = -1;
+  let dots = 0;
+  let code = -1;
+  for (let i = 0; i <= path2.length; ++i) {
+    if (i < path2.length) {
+      code = path2.charCodeAt(i);
+    } else if (code === 47) {
+      break;
+    } else {
+      code = 47;
+    }
+    if (code === 47) {
+      if (lastSlash === i - 1 || dots === 1) ; else if (lastSlash !== i - 1 && dots === 2) {
+        if (res.length < 2 || lastSegmentLength !== 2 || res.charCodeAt(res.length - 1) !== 46 || res.charCodeAt(res.length - 2) !== 46) {
+          if (res.length > 2) {
+            const lastSlashIndex = res.lastIndexOf("/");
+            if (lastSlashIndex !== res.length - 1) {
+              if (lastSlashIndex === -1) {
+                res = "";
+                lastSegmentLength = 0;
+              } else {
+                res = res.slice(0, lastSlashIndex);
+                lastSegmentLength = res.length - 1 - res.lastIndexOf("/");
+              }
+              lastSlash = i;
+              dots = 0;
+              continue;
+            }
+          } else if (res.length === 2 || res.length === 1) {
+            res = "";
+            lastSegmentLength = 0;
+            lastSlash = i;
+            dots = 0;
+            continue;
+          }
+        }
+        if (allowAboveRoot) {
+          if (res.length > 0) {
+            res += "/..";
+          } else {
+            res = "..";
+          }
+          lastSegmentLength = 2;
+        }
+      } else {
+        if (res.length > 0) {
+          res += `/${path2.slice(lastSlash + 1, i)}`;
+        } else {
+          res = path2.slice(lastSlash + 1, i);
+        }
+        lastSegmentLength = i - lastSlash - 1;
+      }
+      lastSlash = i;
+      dots = 0;
+    } else if (code === 46 && dots !== -1) {
+      ++dots;
+    } else {
+      dots = -1;
+    }
+  }
+  return res;
+}
+const path = {
+  toPosix(path2) {
+    return replaceAll(path2, "\\", "/");
+  },
+  isUrl(path2) {
+    return /^https?:/.test(this.toPosix(path2));
+  },
+  isDataUrl(path2) {
+    return /^data:([a-z]+\/[a-z0-9-+.]+(;[a-z0-9-.!#$%*+.{}|~`]+=[a-z0-9-.!#$%*+.{}()_|~`]+)*)?(;base64)?,([a-z0-9!$&',()*+;=\-._~:@\/?%\s<>]*?)$/i.test(path2);
+  },
+  hasProtocol(path2) {
+    return /^[^/:]+:\//.test(this.toPosix(path2));
+  },
+  getProtocol(path2) {
+    assertPath(path2);
+    path2 = this.toPosix(path2);
+    let protocol = "";
+    const isFile = /^file:\/\/\//.exec(path2);
+    const isHttp = /^[^/:]+:\/\//.exec(path2);
+    const isWindows = /^[^/:]+:\//.exec(path2);
+    if (isFile || isHttp || isWindows) {
+      const arr = isFile?.[0] || isHttp?.[0] || isWindows?.[0];
+      protocol = arr;
+      path2 = path2.slice(arr.length);
+    }
+    return protocol;
+  },
+  toAbsolute(url, customBaseUrl, customRootUrl) {
+    if (this.isDataUrl(url))
+      return url;
+    const baseUrl = removeUrlParams(this.toPosix(customBaseUrl ?? settings.ADAPTER.getBaseUrl()));
+    const rootUrl = removeUrlParams(this.toPosix(customRootUrl ?? this.rootname(baseUrl)));
+    assertPath(url);
+    url = this.toPosix(url);
+    if (url.startsWith("/")) {
+      return path.join(rootUrl, url.slice(1));
+    }
+    const absolutePath = this.isAbsolute(url) ? url : this.join(baseUrl, url);
+    return absolutePath;
+  },
+  normalize(path2) {
+    path2 = this.toPosix(path2);
+    assertPath(path2);
+    if (path2.length === 0)
+      return ".";
+    let protocol = "";
+    const isAbsolute = path2.startsWith("/");
+    if (this.hasProtocol(path2)) {
+      protocol = this.rootname(path2);
+      path2 = path2.slice(protocol.length);
+    }
+    const trailingSeparator = path2.endsWith("/");
+    path2 = normalizeStringPosix(path2, false);
+    if (path2.length > 0 && trailingSeparator)
+      path2 += "/";
+    if (isAbsolute)
+      return `/${path2}`;
+    return protocol + path2;
+  },
+  isAbsolute(path2) {
+    assertPath(path2);
+    path2 = this.toPosix(path2);
+    if (this.hasProtocol(path2))
+      return true;
+    return path2.startsWith("/");
+  },
+  join(...segments) {
+    if (segments.length === 0) {
+      return ".";
+    }
+    let joined;
+    for (let i = 0; i < segments.length; ++i) {
+      const arg = segments[i];
+      assertPath(arg);
+      if (arg.length > 0) {
+        if (joined === void 0)
+          joined = arg;
+        else {
+          const prevArg = segments[i - 1] ?? "";
+          if (this.extname(prevArg)) {
+            joined += `/../${arg}`;
+          } else {
+            joined += `/${arg}`;
+          }
+        }
+      }
+    }
+    if (joined === void 0) {
+      return ".";
+    }
+    return this.normalize(joined);
+  },
+  dirname(path2) {
+    assertPath(path2);
+    if (path2.length === 0)
+      return ".";
+    path2 = this.toPosix(path2);
+    let code = path2.charCodeAt(0);
+    const hasRoot = code === 47;
+    let end = -1;
+    let matchedSlash = true;
+    const proto = this.getProtocol(path2);
+    const origpath = path2;
+    path2 = path2.slice(proto.length);
+    for (let i = path2.length - 1; i >= 1; --i) {
+      code = path2.charCodeAt(i);
+      if (code === 47) {
+        if (!matchedSlash) {
+          end = i;
+          break;
+        }
+      } else {
+        matchedSlash = false;
+      }
+    }
+    if (end === -1)
+      return hasRoot ? "/" : this.isUrl(origpath) ? proto + path2 : proto;
+    if (hasRoot && end === 1)
+      return "//";
+    return proto + path2.slice(0, end);
+  },
+  rootname(path2) {
+    assertPath(path2);
+    path2 = this.toPosix(path2);
+    let root = "";
+    if (path2.startsWith("/"))
+      root = "/";
+    else {
+      root = this.getProtocol(path2);
+    }
+    if (this.isUrl(path2)) {
+      const index = path2.indexOf("/", root.length);
+      if (index !== -1) {
+        root = path2.slice(0, index);
+      } else
+        root = path2;
+      if (!root.endsWith("/"))
+        root += "/";
+    }
+    return root;
+  },
+  basename(path2, ext) {
+    assertPath(path2);
+    if (ext)
+      assertPath(ext);
+    path2 = removeUrlParams(this.toPosix(path2));
+    let start = 0;
+    let end = -1;
+    let matchedSlash = true;
+    let i;
+    if (ext !== void 0 && ext.length > 0 && ext.length <= path2.length) {
+      if (ext.length === path2.length && ext === path2)
+        return "";
+      let extIdx = ext.length - 1;
+      let firstNonSlashEnd = -1;
+      for (i = path2.length - 1; i >= 0; --i) {
+        const code = path2.charCodeAt(i);
+        if (code === 47) {
+          if (!matchedSlash) {
+            start = i + 1;
+            break;
+          }
+        } else {
+          if (firstNonSlashEnd === -1) {
+            matchedSlash = false;
+            firstNonSlashEnd = i + 1;
+          }
+          if (extIdx >= 0) {
+            if (code === ext.charCodeAt(extIdx)) {
+              if (--extIdx === -1) {
+                end = i;
+              }
+            } else {
+              extIdx = -1;
+              end = firstNonSlashEnd;
+            }
+          }
+        }
+      }
+      if (start === end)
+        end = firstNonSlashEnd;
+      else if (end === -1)
+        end = path2.length;
+      return path2.slice(start, end);
+    }
+    for (i = path2.length - 1; i >= 0; --i) {
+      if (path2.charCodeAt(i) === 47) {
+        if (!matchedSlash) {
+          start = i + 1;
+          break;
+        }
+      } else if (end === -1) {
+        matchedSlash = false;
+        end = i + 1;
+      }
+    }
+    if (end === -1)
+      return "";
+    return path2.slice(start, end);
+  },
+  extname(path2) {
+    assertPath(path2);
+    path2 = removeUrlParams(this.toPosix(path2));
+    let startDot = -1;
+    let startPart = 0;
+    let end = -1;
+    let matchedSlash = true;
+    let preDotState = 0;
+    for (let i = path2.length - 1; i >= 0; --i) {
+      const code = path2.charCodeAt(i);
+      if (code === 47) {
+        if (!matchedSlash) {
+          startPart = i + 1;
+          break;
+        }
+        continue;
+      }
+      if (end === -1) {
+        matchedSlash = false;
+        end = i + 1;
+      }
+      if (code === 46) {
+        if (startDot === -1)
+          startDot = i;
+        else if (preDotState !== 1)
+          preDotState = 1;
+      } else if (startDot !== -1) {
+        preDotState = -1;
+      }
+    }
+    if (startDot === -1 || end === -1 || preDotState === 0 || preDotState === 1 && startDot === end - 1 && startDot === startPart + 1) {
+      return "";
+    }
+    return path2.slice(startDot, end);
+  },
+  parse(path2) {
+    assertPath(path2);
+    const ret = { root: "", dir: "", base: "", ext: "", name: "" };
+    if (path2.length === 0)
+      return ret;
+    path2 = removeUrlParams(this.toPosix(path2));
+    let code = path2.charCodeAt(0);
+    const isAbsolute = this.isAbsolute(path2);
+    let start;
+    ret.root = this.rootname(path2);
+    if (isAbsolute || this.hasProtocol(path2)) {
+      start = 1;
+    } else {
+      start = 0;
+    }
+    let startDot = -1;
+    let startPart = 0;
+    let end = -1;
+    let matchedSlash = true;
+    let i = path2.length - 1;
+    let preDotState = 0;
+    for (; i >= start; --i) {
+      code = path2.charCodeAt(i);
+      if (code === 47) {
+        if (!matchedSlash) {
+          startPart = i + 1;
+          break;
+        }
+        continue;
+      }
+      if (end === -1) {
+        matchedSlash = false;
+        end = i + 1;
+      }
+      if (code === 46) {
+        if (startDot === -1)
+          startDot = i;
+        else if (preDotState !== 1)
+          preDotState = 1;
+      } else if (startDot !== -1) {
+        preDotState = -1;
+      }
+    }
+    if (startDot === -1 || end === -1 || preDotState === 0 || preDotState === 1 && startDot === end - 1 && startDot === startPart + 1) {
+      if (end !== -1) {
+        if (startPart === 0 && isAbsolute)
+          ret.base = ret.name = path2.slice(1, end);
+        else
+          ret.base = ret.name = path2.slice(startPart, end);
+      }
+    } else {
+      if (startPart === 0 && isAbsolute) {
+        ret.name = path2.slice(1, startDot);
+        ret.base = path2.slice(1, end);
+      } else {
+        ret.name = path2.slice(startPart, startDot);
+        ret.base = path2.slice(startPart, end);
+      }
+      ret.ext = path2.slice(startDot, end);
+    }
+    ret.dir = this.dirname(path2);
+    return ret;
+  },
+  sep: "/",
+  delimiter: ":"
+};
+
 const warnings = {};
 function deprecation(version, message, ignoreDepth = 3) {
   if (warnings[message]) {
@@ -14248,6 +14630,15 @@ Color.shared = new _Color();
 Color.temp = new _Color();
 Color.HEX_PATTERN = /^(#|0x)?(([a-f0-9]{3}){1,2}([a-f0-9]{2})?)$/i;
 
+function hex2string(hex) {
+  deprecation("7.2.0", "utils.hex2string is deprecated, use Color#toHex instead");
+  return Color.shared.setValue(hex).toHex();
+}
+function rgb2hex(rgb) {
+  deprecation("7.2.0", "utils.rgb2hex is deprecated, use Color#toNumber instead");
+  return Color.shared.setValue(rgb).toNumber();
+}
+
 function mapPremultipliedBlendModes() {
   const pm = [];
   const npm = [];
@@ -14267,6 +14658,26 @@ function mapPremultipliedBlendModes() {
   return array;
 }
 const premultiplyBlendMode = mapPremultipliedBlendModes();
+function correctBlendMode(blendMode, premultiplied) {
+  return premultiplyBlendMode[premultiplied ? 1 : 0][blendMode];
+}
+
+function createIndicesForQuads(size, outBuffer = null) {
+  const totalIndices = size * 6;
+  outBuffer = outBuffer || new Uint16Array(totalIndices);
+  if (outBuffer.length !== totalIndices) {
+    throw new Error(`Out buffer length is incorrect, got ${outBuffer.length} and expected ${totalIndices}`);
+  }
+  for (let i = 0, j = 0; i < totalIndices; i += 6, j += 4) {
+    outBuffer[i + 0] = j + 0;
+    outBuffer[i + 1] = j + 1;
+    outBuffer[i + 2] = j + 2;
+    outBuffer[i + 3] = j + 0;
+    outBuffer[i + 4] = j + 2;
+    outBuffer[i + 5] = j + 3;
+  }
+  return outBuffer;
+}
 
 function getBufferType(array) {
   if (array.BYTES_PER_ELEMENT === 4) {
@@ -14341,9 +14752,139 @@ function uid() {
   return ++nextUid;
 }
 
+const _BoundingBox = class {
+  constructor(left, top, right, bottom) {
+    this.left = left;
+    this.top = top;
+    this.right = right;
+    this.bottom = bottom;
+  }
+  get width() {
+    return this.right - this.left;
+  }
+  get height() {
+    return this.bottom - this.top;
+  }
+  isEmpty() {
+    return this.left === this.right || this.top === this.bottom;
+  }
+};
+let BoundingBox = _BoundingBox;
+BoundingBox.EMPTY = new _BoundingBox(0, 0, 0, 0);
+
 const ProgramCache = {};
 const TextureCache = /* @__PURE__ */ Object.create(null);
 const BaseTextureCache = /* @__PURE__ */ Object.create(null);
+
+class CanvasRenderTarget {
+  constructor(width, height, resolution) {
+    this._canvas = settings.ADAPTER.createCanvas();
+    this._context = this._canvas.getContext("2d");
+    this.resolution = resolution || settings.RESOLUTION;
+    this.resize(width, height);
+  }
+  clear() {
+    this._checkDestroyed();
+    this._context.setTransform(1, 0, 0, 1, 0, 0);
+    this._context.clearRect(0, 0, this._canvas.width, this._canvas.height);
+  }
+  resize(desiredWidth, desiredHeight) {
+    this._checkDestroyed();
+    this._canvas.width = Math.round(desiredWidth * this.resolution);
+    this._canvas.height = Math.round(desiredHeight * this.resolution);
+  }
+  destroy() {
+    this._context = null;
+    this._canvas = null;
+  }
+  get width() {
+    this._checkDestroyed();
+    return this._canvas.width;
+  }
+  set width(val) {
+    this._checkDestroyed();
+    this._canvas.width = Math.round(val);
+  }
+  get height() {
+    this._checkDestroyed();
+    return this._canvas.height;
+  }
+  set height(val) {
+    this._checkDestroyed();
+    this._canvas.height = Math.round(val);
+  }
+  get canvas() {
+    this._checkDestroyed();
+    return this._canvas;
+  }
+  get context() {
+    this._checkDestroyed();
+    return this._context;
+  }
+  _checkDestroyed() {
+    if (this._canvas === null) {
+      throw new TypeError("The CanvasRenderTarget has already been destroyed");
+    }
+  }
+}
+
+function checkRow(data, width, y) {
+  for (let x = 0, index = 4 * y * width; x < width; ++x, index += 4) {
+    if (data[index + 3] !== 0)
+      return false;
+  }
+  return true;
+}
+function checkColumn(data, width, x, top, bottom) {
+  const stride = 4 * width;
+  for (let y = top, index = top * stride + 4 * x; y <= bottom; ++y, index += stride) {
+    if (data[index + 3] !== 0)
+      return false;
+  }
+  return true;
+}
+function getCanvasBoundingBox(canvas) {
+  const { width, height } = canvas;
+  const context = canvas.getContext("2d", {
+    willReadFrequently: true
+  });
+  if (context === null) {
+    throw new TypeError("Failed to get canvas 2D context");
+  }
+  const imageData = context.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  let left = 0;
+  let top = 0;
+  let right = width - 1;
+  let bottom = height - 1;
+  while (top < height && checkRow(data, width, top))
+    ++top;
+  if (top === height)
+    return BoundingBox.EMPTY;
+  while (checkRow(data, width, bottom))
+    --bottom;
+  while (checkColumn(data, width, left, top, bottom))
+    ++left;
+  while (checkColumn(data, width, right, top, bottom))
+    --right;
+  ++right;
+  ++bottom;
+  return new BoundingBox(left, top, right, bottom);
+}
+
+function trimCanvas(canvas) {
+  const boundingBox = getCanvasBoundingBox(canvas);
+  const { width, height } = boundingBox;
+  let data = null;
+  if (!boundingBox.isEmpty()) {
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      throw new TypeError("Failed to get canvas 2D context");
+    }
+    data = context.getImageData(boundingBox.left, boundingBox.top, width, height);
+  }
+  return { width, height, data };
+}
 
 let tempAnchor;
 function determineCrossOrigin(url$1, loc = globalThis.location) {
@@ -14404,7 +14945,7 @@ const normalizeExtension = (ext) => {
   return ext;
 };
 const normalizePriority = (ext, defaultPriority) => normalizeExtension(ext).priority ?? defaultPriority;
-const extensions = {
+const extensions$1 = {
   _addHandlers: {},
   _removeHandlers: {},
   _queue: {},
@@ -14540,7 +15081,7 @@ class ViewableBuffer {
   }
 }
 
-const fragTemplate = [
+const fragTemplate$1 = [
   "precision mediump float;",
   "void main(void){",
   "float test = 0.1;",
@@ -14566,7 +15107,7 @@ function checkMaxIfStatementsInShader(maxIfs, gl) {
   }
   const shader = gl.createShader(gl.FRAGMENT_SHADER);
   while (true) {
-    const fragmentSrc = fragTemplate.replace(/%forloop%/gi, generateIfTestSrc(maxIfs));
+    const fragmentSrc = fragTemplate$1.replace(/%forloop%/gi, generateIfTestSrc(maxIfs));
     gl.shaderSource(shader, fragmentSrc);
     gl.compileShader(shader);
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
@@ -16203,7 +16744,7 @@ Transform.IDENTITY = new _Transform();
 
 var defaultFragment$2 = "varying vec2 vTextureCoord;\n\nuniform sampler2D uSampler;\n\nvoid main(void){\n   gl_FragColor *= texture2D(uSampler, vTextureCoord);\n}";
 
-var defaultVertex$2 = "attribute vec2 aVertexPosition;\nattribute vec2 aTextureCoord;\n\nuniform mat3 projectionMatrix;\n\nvarying vec2 vTextureCoord;\n\nvoid main(void){\n   gl_Position = vec4((projectionMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);\n   vTextureCoord = aTextureCoord;\n}\n";
+var defaultVertex$3 = "attribute vec2 aVertexPosition;\nattribute vec2 aTextureCoord;\n\nuniform mat3 projectionMatrix;\n\nvarying vec2 vTextureCoord;\n\nvoid main(void){\n   gl_Position = vec4((projectionMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);\n   vTextureCoord = aTextureCoord;\n}\n";
 
 function compileShader(gl, type, src) {
   const shader = gl.createShader(type);
@@ -16893,7 +17434,7 @@ ${this.fragmentSrc}`;
     this.syncUniforms = null;
   }
   static get defaultVertexSrc() {
-    return defaultVertex$2;
+    return defaultVertex$3;
   }
   static get defaultFragmentSrc() {
     return defaultFragment$2;
@@ -17116,7 +17657,7 @@ class ObjectRenderer {
 
 var defaultFragment$1 = "varying vec2 vTextureCoord;\nvarying vec4 vColor;\nvarying float vTextureId;\nuniform sampler2D uSamplers[%count%];\n\nvoid main(void){\n    vec4 color;\n    %forloop%\n    gl_FragColor = color * vColor;\n}\n";
 
-var defaultVertex$1 = "precision highp float;\nattribute vec2 aVertexPosition;\nattribute vec2 aTextureCoord;\nattribute vec4 aColor;\nattribute float aTextureId;\n\nuniform mat3 projectionMatrix;\nuniform mat3 translationMatrix;\nuniform vec4 tint;\n\nvarying vec2 vTextureCoord;\nvarying vec4 vColor;\nvarying float vTextureId;\n\nvoid main(void){\n    gl_Position = vec4((projectionMatrix * translationMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);\n\n    vTextureCoord = aTextureCoord;\n    vTextureId = aTextureId;\n    vColor = aColor * tint;\n}\n";
+var defaultVertex$2 = "precision highp float;\nattribute vec2 aVertexPosition;\nattribute vec2 aTextureCoord;\nattribute vec4 aColor;\nattribute float aTextureId;\n\nuniform mat3 projectionMatrix;\nuniform mat3 translationMatrix;\nuniform vec4 tint;\n\nvarying vec2 vTextureCoord;\nvarying vec4 vColor;\nvarying float vTextureId;\n\nvoid main(void){\n    gl_Position = vec4((projectionMatrix * translationMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);\n\n    vTextureCoord = aTextureCoord;\n    vTextureId = aTextureId;\n    vColor = aColor * tint;\n}\n";
 
 const _BatchRenderer = class extends ObjectRenderer {
   constructor(renderer) {
@@ -17166,7 +17707,7 @@ const _BatchRenderer = class extends ObjectRenderer {
     return this.maxTextures;
   }
   static get defaultVertexSrc() {
-    return defaultVertex$1;
+    return defaultVertex$2;
   }
   static get defaultFragmentTemplate() {
     return defaultFragment$1;
@@ -17454,11 +17995,11 @@ BatchRenderer.extension = {
 };
 BatchRenderer._drawCallPool = [];
 BatchRenderer._textureArrayPool = [];
-extensions.add(BatchRenderer);
+extensions$1.add(BatchRenderer);
 
 var defaultFragment = "varying vec2 vTextureCoord;\n\nuniform sampler2D uSampler;\n\nvoid main(void){\n   gl_FragColor = texture2D(uSampler, vTextureCoord);\n}\n";
 
-var defaultVertex = "attribute vec2 aVertexPosition;\n\nuniform mat3 projectionMatrix;\n\nvarying vec2 vTextureCoord;\n\nuniform vec4 inputSize;\nuniform vec4 outputFrame;\n\nvec4 filterVertexPosition( void )\n{\n    vec2 position = aVertexPosition * max(outputFrame.zw, vec2(0.)) + outputFrame.xy;\n\n    return vec4((projectionMatrix * vec3(position, 1.0)).xy, 0.0, 1.0);\n}\n\nvec2 filterTextureCoord( void )\n{\n    return aVertexPosition * (outputFrame.zw * inputSize.zw);\n}\n\nvoid main(void)\n{\n    gl_Position = filterVertexPosition();\n    vTextureCoord = filterTextureCoord();\n}\n";
+var defaultVertex$1 = "attribute vec2 aVertexPosition;\n\nuniform mat3 projectionMatrix;\n\nvarying vec2 vTextureCoord;\n\nuniform vec4 inputSize;\nuniform vec4 outputFrame;\n\nvec4 filterVertexPosition( void )\n{\n    vec2 position = aVertexPosition * max(outputFrame.zw, vec2(0.)) + outputFrame.xy;\n\n    return vec4((projectionMatrix * vec3(position, 1.0)).xy, 0.0, 1.0);\n}\n\nvec2 filterTextureCoord( void )\n{\n    return aVertexPosition * (outputFrame.zw * inputSize.zw);\n}\n\nvoid main(void)\n{\n    gl_Position = filterVertexPosition();\n    vTextureCoord = filterTextureCoord();\n}\n";
 
 const _Filter = class extends Shader {
   constructor(vertexSrc, fragmentSrc, uniforms) {
@@ -17487,7 +18028,7 @@ const _Filter = class extends Shader {
     this._resolution = value;
   }
   static get defaultVertexSrc() {
-    return defaultVertex;
+    return defaultVertex$1;
   }
   static get defaultFragmentSrc() {
     return defaultFragment;
@@ -17542,7 +18083,7 @@ BackgroundSystem.extension = {
   ],
   name: "background"
 };
-extensions.add(BackgroundSystem);
+extensions$1.add(BackgroundSystem);
 
 class BatchSystem {
   constructor(renderer) {
@@ -17604,7 +18145,7 @@ BatchSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "batch"
 };
-extensions.add(BatchSystem);
+extensions$1.add(BatchSystem);
 
 let CONTEXT_UID_COUNTER = 0;
 class ContextSystem {
@@ -17765,7 +18306,7 @@ ContextSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "context"
 };
-extensions.add(ContextSystem);
+extensions$1.add(ContextSystem);
 
 class DepthResource extends BufferResource {
   upload(renderer, baseTexture, glTexture) {
@@ -18950,7 +19491,7 @@ FilterSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "filter"
 };
-extensions.add(FilterSystem);
+extensions$1.add(FilterSystem);
 
 class GLFramebuffer {
   constructor(framebuffer) {
@@ -19314,7 +19855,7 @@ FramebufferSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "framebuffer"
 };
-extensions.add(FramebufferSystem);
+extensions$1.add(FramebufferSystem);
 
 const byteSizeMap = { 5126: 4, 5123: 2, 5121: 1 };
 class GeometrySystem {
@@ -19587,9 +20128,9 @@ GeometrySystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "geometry"
 };
-extensions.add(GeometrySystem);
+extensions$1.add(GeometrySystem);
 
-const tempMat = new Matrix();
+const tempMat$1 = new Matrix();
 class TextureMatrix {
   constructor(texture, clampMargin) {
     this._texture = texture;
@@ -19637,8 +20178,8 @@ class TextureMatrix {
     const orig = tex.orig;
     const trim = tex.trim;
     if (trim) {
-      tempMat.set(orig.width / trim.width, 0, 0, orig.height / trim.height, -trim.x / trim.width, -trim.y / trim.height);
-      this.mapCoord.append(tempMat);
+      tempMat$1.set(orig.width / trim.width, 0, 0, orig.height / trim.height, -trim.x / trim.width, -trim.y / trim.height);
+      this.mapCoord.append(tempMat$1);
     }
     const texBase = tex.baseTexture;
     const frame = this.uClampFrame;
@@ -19655,9 +20196,9 @@ class TextureMatrix {
   }
 }
 
-var fragment = "varying vec2 vMaskCoord;\nvarying vec2 vTextureCoord;\n\nuniform sampler2D uSampler;\nuniform sampler2D mask;\nuniform float alpha;\nuniform float npmAlpha;\nuniform vec4 maskClamp;\n\nvoid main(void)\n{\n    float clip = step(3.5,\n        step(maskClamp.x, vMaskCoord.x) +\n        step(maskClamp.y, vMaskCoord.y) +\n        step(vMaskCoord.x, maskClamp.z) +\n        step(vMaskCoord.y, maskClamp.w));\n\n    vec4 original = texture2D(uSampler, vTextureCoord);\n    vec4 masky = texture2D(mask, vMaskCoord);\n    float alphaMul = 1.0 - npmAlpha * (1.0 - masky.a);\n\n    original *= (alphaMul * masky.r * alpha * clip);\n\n    gl_FragColor = original;\n}\n";
+var fragment$7 = "varying vec2 vMaskCoord;\nvarying vec2 vTextureCoord;\n\nuniform sampler2D uSampler;\nuniform sampler2D mask;\nuniform float alpha;\nuniform float npmAlpha;\nuniform vec4 maskClamp;\n\nvoid main(void)\n{\n    float clip = step(3.5,\n        step(maskClamp.x, vMaskCoord.x) +\n        step(maskClamp.y, vMaskCoord.y) +\n        step(vMaskCoord.x, maskClamp.z) +\n        step(vMaskCoord.y, maskClamp.w));\n\n    vec4 original = texture2D(uSampler, vTextureCoord);\n    vec4 masky = texture2D(mask, vMaskCoord);\n    float alphaMul = 1.0 - npmAlpha * (1.0 - masky.a);\n\n    original *= (alphaMul * masky.r * alpha * clip);\n\n    gl_FragColor = original;\n}\n";
 
-var vertex = "attribute vec2 aVertexPosition;\nattribute vec2 aTextureCoord;\n\nuniform mat3 projectionMatrix;\nuniform mat3 otherMatrix;\n\nvarying vec2 vMaskCoord;\nvarying vec2 vTextureCoord;\n\nvoid main(void)\n{\n    gl_Position = vec4((projectionMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);\n\n    vTextureCoord = aTextureCoord;\n    vMaskCoord = ( otherMatrix * vec3( aTextureCoord, 1.0)  ).xy;\n}\n";
+var vertex$4 = "attribute vec2 aVertexPosition;\nattribute vec2 aTextureCoord;\n\nuniform mat3 projectionMatrix;\nuniform mat3 otherMatrix;\n\nvarying vec2 vMaskCoord;\nvarying vec2 vTextureCoord;\n\nvoid main(void)\n{\n    gl_Position = vec4((projectionMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);\n\n    vTextureCoord = aTextureCoord;\n    vMaskCoord = ( otherMatrix * vec3( aTextureCoord, 1.0)  ).xy;\n}\n";
 
 class SpriteMaskFilter extends Filter {
   constructor(vertexSrc, fragmentSrc, uniforms) {
@@ -19668,7 +20209,7 @@ class SpriteMaskFilter extends Filter {
       fragmentSrc = void 0;
       uniforms = void 0;
     }
-    super(vertexSrc || vertex, fragmentSrc || fragment, uniforms);
+    super(vertexSrc || vertex$4, fragmentSrc || fragment$7, uniforms);
     this.maskSprite = sprite;
     this.maskMatrix = new Matrix();
   }
@@ -19916,7 +20457,7 @@ MaskSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "mask"
 };
-extensions.add(MaskSystem);
+extensions$1.add(MaskSystem);
 
 class AbstractMaskSystem {
   constructor(renderer) {
@@ -20052,7 +20593,7 @@ ScissorSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "scissor"
 };
-extensions.add(ScissorSystem);
+extensions$1.add(ScissorSystem);
 
 class StencilSystem extends AbstractMaskSystem {
   constructor(renderer) {
@@ -20127,7 +20668,7 @@ StencilSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "stencil"
 };
-extensions.add(StencilSystem);
+extensions$1.add(StencilSystem);
 
 class PluginSystem {
   constructor(renderer) {
@@ -20177,7 +20718,7 @@ PluginSystem.extension = {
   ],
   name: "_plugin"
 };
-extensions.add(PluginSystem);
+extensions$1.add(PluginSystem);
 
 class ProjectionSystem {
   constructor(renderer) {
@@ -20221,7 +20762,7 @@ ProjectionSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "projection"
 };
-extensions.add(ProjectionSystem);
+extensions$1.add(ProjectionSystem);
 
 const tempTransform = new Transform();
 class GenerateTextureSystem {
@@ -20264,7 +20805,7 @@ GenerateTextureSystem.extension = {
   ],
   name: "textureGenerator"
 };
-extensions.add(GenerateTextureSystem);
+extensions$1.add(GenerateTextureSystem);
 
 const tempRect = new Rectangle();
 const tempRect2 = new Rectangle();
@@ -20372,7 +20913,7 @@ RenderTextureSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "renderTexture"
 };
-extensions.add(RenderTextureSystem);
+extensions$1.add(RenderTextureSystem);
 
 class GLProgram {
   constructor(program, uniformData) {
@@ -20797,7 +21338,7 @@ ShaderSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "shader"
 };
-extensions.add(ShaderSystem);
+extensions$1.add(ShaderSystem);
 
 class StartupSystem {
   constructor(renderer) {
@@ -20824,7 +21365,7 @@ StartupSystem.extension = {
   ],
   name: "startup"
 };
-extensions.add(StartupSystem);
+extensions$1.add(StartupSystem);
 
 function mapWebGLBlendModesToPixi(gl, array = []) {
   array[BLEND_MODES.NORMAL] = [gl.ONE, gl.ONE_MINUS_SRC_ALPHA];
@@ -20991,7 +21532,7 @@ StateSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "state"
 };
-extensions.add(StateSystem);
+extensions$1.add(StateSystem);
 
 class SystemManager extends eventemitter3Exports {
   constructor() {
@@ -21109,7 +21650,7 @@ TextureGCSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "textureGC"
 };
-extensions.add(TextureGCSystem);
+extensions$1.add(TextureGCSystem);
 
 class GLTexture {
   constructor(texture) {
@@ -21458,7 +21999,7 @@ TextureSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "texture"
 };
-extensions.add(TextureSystem);
+extensions$1.add(TextureSystem);
 
 class TransformFeedbackSystem {
   constructor(renderer) {
@@ -21540,7 +22081,7 @@ TransformFeedbackSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "transformFeedback"
 };
-extensions.add(TransformFeedbackSystem);
+extensions$1.add(TransformFeedbackSystem);
 
 class ViewSystem {
   constructor(renderer) {
@@ -21588,7 +22129,7 @@ ViewSystem.extension = {
   ],
   name: "_view"
 };
-extensions.add(ViewSystem);
+extensions$1.add(ViewSystem);
 
 settings.PREFER_ENV = ENV.WEBGL2;
 settings.STRICT_TEXTURE_CACHE = false;
@@ -22039,10 +22580,25 @@ class TickerPlugin {
   }
 }
 TickerPlugin.extension = ExtensionType.Application;
-extensions.add(TickerPlugin);
+extensions$1.add(TickerPlugin);
 
 const renderers = [];
-extensions.handleByList(ExtensionType.Renderer, renderers);
+extensions$1.handleByList(ExtensionType.Renderer, renderers);
+function autoDetectRenderer(options) {
+  for (const RendererType of renderers) {
+    if (RendererType.test(options)) {
+      return new RendererType(options);
+    }
+  }
+  throw new Error("Unable to auto-detect a suitable renderer.");
+}
+
+var $defaultVertex = "attribute vec2 aVertexPosition;\nattribute vec2 aTextureCoord;\n\nuniform mat3 projectionMatrix;\n\nvarying vec2 vTextureCoord;\n\nvoid main(void)\n{\n    gl_Position = vec4((projectionMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);\n    vTextureCoord = aTextureCoord;\n}";
+
+var $defaultFilterVertex = "attribute vec2 aVertexPosition;\n\nuniform mat3 projectionMatrix;\n\nvarying vec2 vTextureCoord;\n\nuniform vec4 inputSize;\nuniform vec4 outputFrame;\n\nvec4 filterVertexPosition( void )\n{\n    vec2 position = aVertexPosition * max(outputFrame.zw, vec2(0.)) + outputFrame.xy;\n\n    return vec4((projectionMatrix * vec3(position, 1.0)).xy, 0.0, 1.0);\n}\n\nvec2 filterTextureCoord( void )\n{\n    return aVertexPosition * (outputFrame.zw * inputSize.zw);\n}\n\nvoid main(void)\n{\n    gl_Position = filterVertexPosition();\n    vTextureCoord = filterTextureCoord();\n}\n";
+
+const defaultVertex = $defaultVertex;
+const defaultFilterVertex = $defaultFilterVertex;
 
 class MultisampleSystem {
   constructor(renderer) {
@@ -22078,7 +22634,7 @@ MultisampleSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "_multisample"
 };
-extensions.add(MultisampleSystem);
+extensions$1.add(MultisampleSystem);
 
 class GLBuffer {
   constructor(buffer) {
@@ -22176,7 +22732,7 @@ BufferSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "buffer"
 };
-extensions.add(BufferSystem);
+extensions$1.add(BufferSystem);
 
 class ObjectRendererSystem {
   constructor(renderer) {
@@ -22235,7 +22791,7 @@ ObjectRendererSystem.extension = {
   type: ExtensionType.RendererSystem,
   name: "objectRenderer"
 };
-extensions.add(ObjectRendererSystem);
+extensions$1.add(ObjectRendererSystem);
 
 const _Renderer = class extends SystemManager {
   constructor(options) {
@@ -22402,9 +22958,9 @@ Renderer.extension = {
 };
 Renderer.__plugins = {};
 Renderer.__systems = {};
-extensions.handleByMap(ExtensionType.RendererPlugin, Renderer.__plugins);
-extensions.handleByMap(ExtensionType.RendererSystem, Renderer.__systems);
-extensions.add(Renderer);
+extensions$1.handleByMap(ExtensionType.RendererPlugin, Renderer.__plugins);
+extensions$1.handleByMap(ExtensionType.RendererSystem, Renderer.__systems);
+extensions$1.add(Renderer);
 
 class AbstractMultiResource extends Resource {
   constructor(length, options) {
@@ -23841,7 +24397,7 @@ Object.defineProperties(settings, {
   }
 });
 
-const tempPoint = new Point();
+const tempPoint$1 = new Point();
 const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
 class Sprite extends Container {
   constructor(texture) {
@@ -24002,14 +24558,14 @@ class Sprite extends Container {
     return super.getLocalBounds.call(this, rect);
   }
   containsPoint(point) {
-    this.worldTransform.applyInverse(point, tempPoint);
+    this.worldTransform.applyInverse(point, tempPoint$1);
     const width = this._texture.orig.width;
     const height = this._texture.orig.height;
     const x1 = -width * this.anchor.x;
     let y1 = 0;
-    if (tempPoint.x >= x1 && tempPoint.x < x1 + width) {
+    if (tempPoint$1.x >= x1 && tempPoint$1.x < x1 + width) {
       y1 = -height * this.anchor.y;
-      if (tempPoint.y >= y1 && tempPoint.y < y1 + height) {
+      if (tempPoint$1.y >= y1 && tempPoint$1.y < y1 + height) {
         return true;
       }
     }
@@ -24095,72 +24651,5053 @@ class Sprite extends Container {
   }
 }
 
-/**
- * Extends the pixi sprite class to include a Matter body and its properties.
- */
-var PhysicsSprite = /*#__PURE__*/function (_Sprite) {
-  _inherits(PhysicsSprite, _Sprite);
-  var _super = _createSuper(PhysicsSprite);
-  /**
-   * @param {Texture} texture The texture of the sprite.
-   * @param {SpriteOptions} spriteOptions The options to define the initial properties of the sprite.
-   * @param {PhysicsOptions} physicsOptions The options to apply to the sprite's body.
-   */
-  function PhysicsSprite(texture) {
-    var _this;
-    var spriteOptions = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-    var physicsOptions = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
-    _classCallCheck(this, PhysicsSprite);
-    _this = _super.call(this, texture);
-    /**
-     * A reference to the physics options for this sprite's body.
-     *
-     * @property {IBodyDefinition}
-     */
-    _defineProperty(_assertThisInitialized(_this), "physicsOptions", void 0);
-    /**
-     * The physics body of the sprite.
-     *
-     * @private
-     *
-     * @property {Body}
-     */
-    _defineProperty(_assertThisInitialized(_this), "_body", void 0);
-    _this.anchor.x = 0.5;
-    _this.anchor.y = 0.5;
-    _this.position.x = spriteOptions.x || 0;
-    _this.position.y = spriteOptions.y || 0;
-    if (spriteOptions.width) _this.width = spriteOptions.width;
-    if (spriteOptions.height) _this.height = spriteOptions.height;
-    _this.physicsOptions = physicsOptions;
-    if (spriteOptions.isCircle) _this._body = matterExports.Bodies.circle(_this.x, _this.y, _this.width, _this.physicsOptions);else _this._body = matterExports.Bodies.rectangle(_this.x, _this.y, _this.width, _this.height, _this.physicsOptions);
-    return _this;
+const _tempMatrix = new Matrix();
+DisplayObject.prototype._cacheAsBitmap = false;
+DisplayObject.prototype._cacheData = null;
+DisplayObject.prototype._cacheAsBitmapResolution = null;
+DisplayObject.prototype._cacheAsBitmapMultisample = null;
+class CacheData {
+  constructor() {
+    this.textureCacheId = null;
+    this.originalRender = null;
+    this.originalRenderCanvas = null;
+    this.originalCalculateBounds = null;
+    this.originalGetLocalBounds = null;
+    this.originalUpdateTransform = null;
+    this.originalDestroy = null;
+    this.originalMask = null;
+    this.originalFilterArea = null;
+    this.originalContainsPoint = null;
+    this.sprite = null;
   }
+}
+Object.defineProperties(DisplayObject.prototype, {
+  cacheAsBitmapResolution: {
+    get() {
+      return this._cacheAsBitmapResolution;
+    },
+    set(resolution) {
+      if (resolution === this._cacheAsBitmapResolution) {
+        return;
+      }
+      this._cacheAsBitmapResolution = resolution;
+      if (this.cacheAsBitmap) {
+        this.cacheAsBitmap = false;
+        this.cacheAsBitmap = true;
+      }
+    }
+  },
+  cacheAsBitmapMultisample: {
+    get() {
+      return this._cacheAsBitmapMultisample;
+    },
+    set(multisample) {
+      if (multisample === this._cacheAsBitmapMultisample) {
+        return;
+      }
+      this._cacheAsBitmapMultisample = multisample;
+      if (this.cacheAsBitmap) {
+        this.cacheAsBitmap = false;
+        this.cacheAsBitmap = true;
+      }
+    }
+  },
+  cacheAsBitmap: {
+    get() {
+      return this._cacheAsBitmap;
+    },
+    set(value) {
+      if (this._cacheAsBitmap === value) {
+        return;
+      }
+      this._cacheAsBitmap = value;
+      let data;
+      if (value) {
+        if (!this._cacheData) {
+          this._cacheData = new CacheData();
+        }
+        data = this._cacheData;
+        data.originalRender = this.render;
+        data.originalRenderCanvas = this.renderCanvas;
+        data.originalUpdateTransform = this.updateTransform;
+        data.originalCalculateBounds = this.calculateBounds;
+        data.originalGetLocalBounds = this.getLocalBounds;
+        data.originalDestroy = this.destroy;
+        data.originalContainsPoint = this.containsPoint;
+        data.originalMask = this._mask;
+        data.originalFilterArea = this.filterArea;
+        this.render = this._renderCached;
+        this.renderCanvas = this._renderCachedCanvas;
+        this.destroy = this._cacheAsBitmapDestroy;
+      } else {
+        data = this._cacheData;
+        if (data.sprite) {
+          this._destroyCachedDisplayObject();
+        }
+        this.render = data.originalRender;
+        this.renderCanvas = data.originalRenderCanvas;
+        this.calculateBounds = data.originalCalculateBounds;
+        this.getLocalBounds = data.originalGetLocalBounds;
+        this.destroy = data.originalDestroy;
+        this.updateTransform = data.originalUpdateTransform;
+        this.containsPoint = data.originalContainsPoint;
+        this._mask = data.originalMask;
+        this.filterArea = data.originalFilterArea;
+      }
+    }
+  }
+});
+DisplayObject.prototype._renderCached = function _renderCached(renderer) {
+  if (!this.visible || this.worldAlpha <= 0 || !this.renderable) {
+    return;
+  }
+  this._initCachedDisplayObject(renderer);
+  this._cacheData.sprite.transform._worldID = this.transform._worldID;
+  this._cacheData.sprite.worldAlpha = this.worldAlpha;
+  this._cacheData.sprite._render(renderer);
+};
+DisplayObject.prototype._initCachedDisplayObject = function _initCachedDisplayObject(renderer) {
+  if (this._cacheData?.sprite) {
+    return;
+  }
+  const cacheAlpha = this.alpha;
+  this.alpha = 1;
+  renderer.batch.flush();
+  const bounds = this.getLocalBounds(null, true).clone();
+  if (this.filters?.length) {
+    const padding = this.filters[0].padding;
+    bounds.pad(padding);
+  }
+  bounds.ceil(settings.RESOLUTION);
+  const cachedRenderTexture = renderer.renderTexture.current;
+  const cachedSourceFrame = renderer.renderTexture.sourceFrame.clone();
+  const cachedDestinationFrame = renderer.renderTexture.destinationFrame.clone();
+  const cachedProjectionTransform = renderer.projection.transform;
+  const renderTexture = RenderTexture.create({
+    width: bounds.width,
+    height: bounds.height,
+    resolution: this.cacheAsBitmapResolution || renderer.resolution,
+    multisample: this.cacheAsBitmapMultisample ?? renderer.multisample
+  });
+  const textureCacheId = `cacheAsBitmap_${uid()}`;
+  this._cacheData.textureCacheId = textureCacheId;
+  BaseTexture.addToCache(renderTexture.baseTexture, textureCacheId);
+  Texture.addToCache(renderTexture, textureCacheId);
+  const m = this.transform.localTransform.copyTo(_tempMatrix).invert().translate(-bounds.x, -bounds.y);
+  this.render = this._cacheData.originalRender;
+  renderer.render(this, { renderTexture, clear: true, transform: m, skipUpdateTransform: false });
+  renderer.framebuffer.blit();
+  renderer.projection.transform = cachedProjectionTransform;
+  renderer.renderTexture.bind(cachedRenderTexture, cachedSourceFrame, cachedDestinationFrame);
+  this.render = this._renderCached;
+  this.updateTransform = this.displayObjectUpdateTransform;
+  this.calculateBounds = this._calculateCachedBounds;
+  this.getLocalBounds = this._getCachedLocalBounds;
+  this._mask = null;
+  this.filterArea = null;
+  this.alpha = cacheAlpha;
+  const cachedSprite = new Sprite(renderTexture);
+  cachedSprite.transform.worldTransform = this.transform.worldTransform;
+  cachedSprite.anchor.x = -(bounds.x / bounds.width);
+  cachedSprite.anchor.y = -(bounds.y / bounds.height);
+  cachedSprite.alpha = cacheAlpha;
+  cachedSprite._bounds = this._bounds;
+  this._cacheData.sprite = cachedSprite;
+  this.transform._parentID = -1;
+  if (!this.parent) {
+    this.enableTempParent();
+    this.updateTransform();
+    this.disableTempParent(null);
+  } else {
+    this.updateTransform();
+  }
+  this.containsPoint = cachedSprite.containsPoint.bind(cachedSprite);
+};
+DisplayObject.prototype._renderCachedCanvas = function _renderCachedCanvas(renderer) {
+  if (!this.visible || this.worldAlpha <= 0 || !this.renderable) {
+    return;
+  }
+  this._initCachedDisplayObjectCanvas(renderer);
+  this._cacheData.sprite.worldAlpha = this.worldAlpha;
+  this._cacheData.sprite._renderCanvas(renderer);
+};
+DisplayObject.prototype._initCachedDisplayObjectCanvas = function _initCachedDisplayObjectCanvas(renderer) {
+  if (this._cacheData?.sprite) {
+    return;
+  }
+  const bounds = this.getLocalBounds(null, true);
+  const cacheAlpha = this.alpha;
+  this.alpha = 1;
+  const cachedRenderTarget = renderer.canvasContext.activeContext;
+  const cachedProjectionTransform = renderer._projTransform;
+  bounds.ceil(settings.RESOLUTION);
+  const renderTexture = RenderTexture.create({ width: bounds.width, height: bounds.height });
+  const textureCacheId = `cacheAsBitmap_${uid()}`;
+  this._cacheData.textureCacheId = textureCacheId;
+  BaseTexture.addToCache(renderTexture.baseTexture, textureCacheId);
+  Texture.addToCache(renderTexture, textureCacheId);
+  const m = _tempMatrix;
+  this.transform.localTransform.copyTo(m);
+  m.invert();
+  m.tx -= bounds.x;
+  m.ty -= bounds.y;
+  this.renderCanvas = this._cacheData.originalRenderCanvas;
+  renderer.render(this, { renderTexture, clear: true, transform: m, skipUpdateTransform: false });
+  renderer.canvasContext.activeContext = cachedRenderTarget;
+  renderer._projTransform = cachedProjectionTransform;
+  this.renderCanvas = this._renderCachedCanvas;
+  this.updateTransform = this.displayObjectUpdateTransform;
+  this.calculateBounds = this._calculateCachedBounds;
+  this.getLocalBounds = this._getCachedLocalBounds;
+  this._mask = null;
+  this.filterArea = null;
+  this.alpha = cacheAlpha;
+  const cachedSprite = new Sprite(renderTexture);
+  cachedSprite.transform.worldTransform = this.transform.worldTransform;
+  cachedSprite.anchor.x = -(bounds.x / bounds.width);
+  cachedSprite.anchor.y = -(bounds.y / bounds.height);
+  cachedSprite.alpha = cacheAlpha;
+  cachedSprite._bounds = this._bounds;
+  this._cacheData.sprite = cachedSprite;
+  this.transform._parentID = -1;
+  if (!this.parent) {
+    this.parent = renderer._tempDisplayObjectParent;
+    this.updateTransform();
+    this.parent = null;
+  } else {
+    this.updateTransform();
+  }
+  this.containsPoint = cachedSprite.containsPoint.bind(cachedSprite);
+};
+DisplayObject.prototype._calculateCachedBounds = function _calculateCachedBounds() {
+  this._bounds.clear();
+  this._cacheData.sprite.transform._worldID = this.transform._worldID;
+  this._cacheData.sprite._calculateBounds();
+  this._bounds.updateID = this._boundsID;
+};
+DisplayObject.prototype._getCachedLocalBounds = function _getCachedLocalBounds() {
+  return this._cacheData.sprite.getLocalBounds(null);
+};
+DisplayObject.prototype._destroyCachedDisplayObject = function _destroyCachedDisplayObject() {
+  this._cacheData.sprite._texture.destroy(true);
+  this._cacheData.sprite = null;
+  BaseTexture.removeFromCache(this._cacheData.textureCacheId);
+  Texture.removeFromCache(this._cacheData.textureCacheId);
+  this._cacheData.textureCacheId = null;
+};
+DisplayObject.prototype._cacheAsBitmapDestroy = function _cacheAsBitmapDestroy(options) {
+  this.cacheAsBitmap = false;
+  this.destroy(options);
+};
 
-  /**
-   * Returns the physics body of the sprite.
-   *
-   * @returns {Body}
-   */
-  _createClass(PhysicsSprite, [{
-    key: "body",
-    get: function get() {
-      return this._body;
+DisplayObject.prototype.name = null;
+Container.prototype.getChildByName = function getChildByName(name, deep) {
+  for (let i = 0, j = this.children.length; i < j; i++) {
+    if (this.children[i].name === name) {
+      return this.children[i];
+    }
+  }
+  if (deep) {
+    for (let i = 0, j = this.children.length; i < j; i++) {
+      const child = this.children[i];
+      if (!child.getChildByName) {
+        continue;
+      }
+      const target = child.getChildByName(name, true);
+      if (target) {
+        return target;
+      }
+    }
+  }
+  return null;
+};
+
+DisplayObject.prototype.getGlobalPosition = function getGlobalPosition(point = new Point(), skipUpdate = false) {
+  if (this.parent) {
+    this.parent.toGlobal(this.position, point, skipUpdate);
+  } else {
+    point.x = this.position.x;
+    point.y = this.position.y;
+  }
+  return point;
+};
+
+var fragment$6 = "varying vec2 vTextureCoord;\n\nuniform sampler2D uSampler;\nuniform float uAlpha;\n\nvoid main(void)\n{\n   gl_FragColor = texture2D(uSampler, vTextureCoord) * uAlpha;\n}\n";
+
+class AlphaFilter extends Filter {
+  constructor(alpha = 1) {
+    super(defaultVertex, fragment$6, { uAlpha: 1 });
+    this.alpha = alpha;
+  }
+  get alpha() {
+    return this.uniforms.uAlpha;
+  }
+  set alpha(value) {
+    this.uniforms.uAlpha = value;
+  }
+}
+
+const GAUSSIAN_VALUES = {
+  5: [0.153388, 0.221461, 0.250301],
+  7: [0.071303, 0.131514, 0.189879, 0.214607],
+  9: [0.028532, 0.067234, 0.124009, 0.179044, 0.20236],
+  11: [93e-4, 0.028002, 0.065984, 0.121703, 0.175713, 0.198596],
+  13: [2406e-6, 9255e-6, 0.027867, 0.065666, 0.121117, 0.174868, 0.197641],
+  15: [489e-6, 2403e-6, 9246e-6, 0.02784, 0.065602, 0.120999, 0.174697, 0.197448]
+};
+const fragTemplate = [
+  "varying vec2 vBlurTexCoords[%size%];",
+  "uniform sampler2D uSampler;",
+  "void main(void)",
+  "{",
+  "    gl_FragColor = vec4(0.0);",
+  "    %blur%",
+  "}"
+].join("\n");
+function generateBlurFragSource(kernelSize) {
+  const kernel = GAUSSIAN_VALUES[kernelSize];
+  const halfLength = kernel.length;
+  let fragSource = fragTemplate;
+  let blurLoop = "";
+  const template = "gl_FragColor += texture2D(uSampler, vBlurTexCoords[%index%]) * %value%;";
+  let value;
+  for (let i = 0; i < kernelSize; i++) {
+    let blur = template.replace("%index%", i.toString());
+    value = i;
+    if (i >= halfLength) {
+      value = kernelSize - i - 1;
+    }
+    blur = blur.replace("%value%", kernel[value].toString());
+    blurLoop += blur;
+    blurLoop += "\n";
+  }
+  fragSource = fragSource.replace("%blur%", blurLoop);
+  fragSource = fragSource.replace("%size%", kernelSize.toString());
+  return fragSource;
+}
+
+const vertTemplate = `
+    attribute vec2 aVertexPosition;
+
+    uniform mat3 projectionMatrix;
+
+    uniform float strength;
+
+    varying vec2 vBlurTexCoords[%size%];
+
+    uniform vec4 inputSize;
+    uniform vec4 outputFrame;
+
+    vec4 filterVertexPosition( void )
+    {
+        vec2 position = aVertexPosition * max(outputFrame.zw, vec2(0.)) + outputFrame.xy;
+
+        return vec4((projectionMatrix * vec3(position, 1.0)).xy, 0.0, 1.0);
     }
 
-    /**
-     * Updates the position of the sprite according to where its body should be.
-     */
-  }, {
-    key: "update",
-    value: function update() {
-      this.position.x = this._body.position.x;
-      this.position.y = this._body.position.y;
-      this.rotation = this._body.angle;
+    vec2 filterTextureCoord( void )
+    {
+        return aVertexPosition * (outputFrame.zw * inputSize.zw);
     }
-  }]);
-  return PhysicsSprite;
-}(Sprite);
+
+    void main(void)
+    {
+        gl_Position = filterVertexPosition();
+
+        vec2 textureCoord = filterTextureCoord();
+        %blur%
+    }`;
+function generateBlurVertSource(kernelSize, x) {
+  const halfLength = Math.ceil(kernelSize / 2);
+  let vertSource = vertTemplate;
+  let blurLoop = "";
+  let template;
+  if (x) {
+    template = "vBlurTexCoords[%index%] =  textureCoord + vec2(%sampleIndex% * strength, 0.0);";
+  } else {
+    template = "vBlurTexCoords[%index%] =  textureCoord + vec2(0.0, %sampleIndex% * strength);";
+  }
+  for (let i = 0; i < kernelSize; i++) {
+    let blur = template.replace("%index%", i.toString());
+    blur = blur.replace("%sampleIndex%", `${i - (halfLength - 1)}.0`);
+    blurLoop += blur;
+    blurLoop += "\n";
+  }
+  vertSource = vertSource.replace("%blur%", blurLoop);
+  vertSource = vertSource.replace("%size%", kernelSize.toString());
+  return vertSource;
+}
+
+class BlurFilterPass extends Filter {
+  constructor(horizontal, strength = 8, quality = 4, resolution = Filter.defaultResolution, kernelSize = 5) {
+    const vertSrc = generateBlurVertSource(kernelSize, horizontal);
+    const fragSrc = generateBlurFragSource(kernelSize);
+    super(vertSrc, fragSrc);
+    this.horizontal = horizontal;
+    this.resolution = resolution;
+    this._quality = 0;
+    this.quality = quality;
+    this.blur = strength;
+  }
+  apply(filterManager, input, output, clearMode) {
+    if (output) {
+      if (this.horizontal) {
+        this.uniforms.strength = 1 / output.width * (output.width / input.width);
+      } else {
+        this.uniforms.strength = 1 / output.height * (output.height / input.height);
+      }
+    } else {
+      if (this.horizontal) {
+        this.uniforms.strength = 1 / filterManager.renderer.width * (filterManager.renderer.width / input.width);
+      } else {
+        this.uniforms.strength = 1 / filterManager.renderer.height * (filterManager.renderer.height / input.height);
+      }
+    }
+    this.uniforms.strength *= this.strength;
+    this.uniforms.strength /= this.passes;
+    if (this.passes === 1) {
+      filterManager.applyFilter(this, input, output, clearMode);
+    } else {
+      const renderTarget = filterManager.getFilterTexture();
+      const renderer = filterManager.renderer;
+      let flip = input;
+      let flop = renderTarget;
+      this.state.blend = false;
+      filterManager.applyFilter(this, flip, flop, CLEAR_MODES.CLEAR);
+      for (let i = 1; i < this.passes - 1; i++) {
+        filterManager.bindAndClear(flip, CLEAR_MODES.BLIT);
+        this.uniforms.uSampler = flop;
+        const temp = flop;
+        flop = flip;
+        flip = temp;
+        renderer.shader.bind(this);
+        renderer.geometry.draw(5);
+      }
+      this.state.blend = true;
+      filterManager.applyFilter(this, flop, output, clearMode);
+      filterManager.returnFilterTexture(renderTarget);
+    }
+  }
+  get blur() {
+    return this.strength;
+  }
+  set blur(value) {
+    this.padding = 1 + Math.abs(value) * 2;
+    this.strength = value;
+  }
+  get quality() {
+    return this._quality;
+  }
+  set quality(value) {
+    this._quality = value;
+    this.passes = value;
+  }
+}
+
+class BlurFilter extends Filter {
+  constructor(strength = 8, quality = 4, resolution = Filter.defaultResolution, kernelSize = 5) {
+    super();
+    this._repeatEdgePixels = false;
+    this.blurXFilter = new BlurFilterPass(true, strength, quality, resolution, kernelSize);
+    this.blurYFilter = new BlurFilterPass(false, strength, quality, resolution, kernelSize);
+    this.resolution = resolution;
+    this.quality = quality;
+    this.blur = strength;
+    this.repeatEdgePixels = false;
+  }
+  apply(filterManager, input, output, clearMode) {
+    const xStrength = Math.abs(this.blurXFilter.strength);
+    const yStrength = Math.abs(this.blurYFilter.strength);
+    if (xStrength && yStrength) {
+      const renderTarget = filterManager.getFilterTexture();
+      this.blurXFilter.apply(filterManager, input, renderTarget, CLEAR_MODES.CLEAR);
+      this.blurYFilter.apply(filterManager, renderTarget, output, clearMode);
+      filterManager.returnFilterTexture(renderTarget);
+    } else if (yStrength) {
+      this.blurYFilter.apply(filterManager, input, output, clearMode);
+    } else {
+      this.blurXFilter.apply(filterManager, input, output, clearMode);
+    }
+  }
+  updatePadding() {
+    if (this._repeatEdgePixels) {
+      this.padding = 0;
+    } else {
+      this.padding = Math.max(Math.abs(this.blurXFilter.strength), Math.abs(this.blurYFilter.strength)) * 2;
+    }
+  }
+  get blur() {
+    return this.blurXFilter.blur;
+  }
+  set blur(value) {
+    this.blurXFilter.blur = this.blurYFilter.blur = value;
+    this.updatePadding();
+  }
+  get quality() {
+    return this.blurXFilter.quality;
+  }
+  set quality(value) {
+    this.blurXFilter.quality = this.blurYFilter.quality = value;
+  }
+  get blurX() {
+    return this.blurXFilter.blur;
+  }
+  set blurX(value) {
+    this.blurXFilter.blur = value;
+    this.updatePadding();
+  }
+  get blurY() {
+    return this.blurYFilter.blur;
+  }
+  set blurY(value) {
+    this.blurYFilter.blur = value;
+    this.updatePadding();
+  }
+  get blendMode() {
+    return this.blurYFilter.blendMode;
+  }
+  set blendMode(value) {
+    this.blurYFilter.blendMode = value;
+  }
+  get repeatEdgePixels() {
+    return this._repeatEdgePixels;
+  }
+  set repeatEdgePixels(value) {
+    this._repeatEdgePixels = value;
+    this.updatePadding();
+  }
+}
+
+var fragment$5 = "varying vec2 vTextureCoord;\nuniform sampler2D uSampler;\nuniform float m[20];\nuniform float uAlpha;\n\nvoid main(void)\n{\n    vec4 c = texture2D(uSampler, vTextureCoord);\n\n    if (uAlpha == 0.0) {\n        gl_FragColor = c;\n        return;\n    }\n\n    // Un-premultiply alpha before applying the color matrix. See issue #3539.\n    if (c.a > 0.0) {\n      c.rgb /= c.a;\n    }\n\n    vec4 result;\n\n    result.r = (m[0] * c.r);\n        result.r += (m[1] * c.g);\n        result.r += (m[2] * c.b);\n        result.r += (m[3] * c.a);\n        result.r += m[4];\n\n    result.g = (m[5] * c.r);\n        result.g += (m[6] * c.g);\n        result.g += (m[7] * c.b);\n        result.g += (m[8] * c.a);\n        result.g += m[9];\n\n    result.b = (m[10] * c.r);\n       result.b += (m[11] * c.g);\n       result.b += (m[12] * c.b);\n       result.b += (m[13] * c.a);\n       result.b += m[14];\n\n    result.a = (m[15] * c.r);\n       result.a += (m[16] * c.g);\n       result.a += (m[17] * c.b);\n       result.a += (m[18] * c.a);\n       result.a += m[19];\n\n    vec3 rgb = mix(c.rgb, result.rgb, uAlpha);\n\n    // Premultiply alpha again.\n    rgb *= result.a;\n\n    gl_FragColor = vec4(rgb, result.a);\n}\n";
+
+class ColorMatrixFilter extends Filter {
+  constructor() {
+    const uniforms = {
+      m: new Float32Array([
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0
+      ]),
+      uAlpha: 1
+    };
+    super(defaultFilterVertex, fragment$5, uniforms);
+    this.alpha = 1;
+  }
+  _loadMatrix(matrix, multiply = false) {
+    let newMatrix = matrix;
+    if (multiply) {
+      this._multiply(newMatrix, this.uniforms.m, matrix);
+      newMatrix = this._colorMatrix(newMatrix);
+    }
+    this.uniforms.m = newMatrix;
+  }
+  _multiply(out, a, b) {
+    out[0] = a[0] * b[0] + a[1] * b[5] + a[2] * b[10] + a[3] * b[15];
+    out[1] = a[0] * b[1] + a[1] * b[6] + a[2] * b[11] + a[3] * b[16];
+    out[2] = a[0] * b[2] + a[1] * b[7] + a[2] * b[12] + a[3] * b[17];
+    out[3] = a[0] * b[3] + a[1] * b[8] + a[2] * b[13] + a[3] * b[18];
+    out[4] = a[0] * b[4] + a[1] * b[9] + a[2] * b[14] + a[3] * b[19] + a[4];
+    out[5] = a[5] * b[0] + a[6] * b[5] + a[7] * b[10] + a[8] * b[15];
+    out[6] = a[5] * b[1] + a[6] * b[6] + a[7] * b[11] + a[8] * b[16];
+    out[7] = a[5] * b[2] + a[6] * b[7] + a[7] * b[12] + a[8] * b[17];
+    out[8] = a[5] * b[3] + a[6] * b[8] + a[7] * b[13] + a[8] * b[18];
+    out[9] = a[5] * b[4] + a[6] * b[9] + a[7] * b[14] + a[8] * b[19] + a[9];
+    out[10] = a[10] * b[0] + a[11] * b[5] + a[12] * b[10] + a[13] * b[15];
+    out[11] = a[10] * b[1] + a[11] * b[6] + a[12] * b[11] + a[13] * b[16];
+    out[12] = a[10] * b[2] + a[11] * b[7] + a[12] * b[12] + a[13] * b[17];
+    out[13] = a[10] * b[3] + a[11] * b[8] + a[12] * b[13] + a[13] * b[18];
+    out[14] = a[10] * b[4] + a[11] * b[9] + a[12] * b[14] + a[13] * b[19] + a[14];
+    out[15] = a[15] * b[0] + a[16] * b[5] + a[17] * b[10] + a[18] * b[15];
+    out[16] = a[15] * b[1] + a[16] * b[6] + a[17] * b[11] + a[18] * b[16];
+    out[17] = a[15] * b[2] + a[16] * b[7] + a[17] * b[12] + a[18] * b[17];
+    out[18] = a[15] * b[3] + a[16] * b[8] + a[17] * b[13] + a[18] * b[18];
+    out[19] = a[15] * b[4] + a[16] * b[9] + a[17] * b[14] + a[18] * b[19] + a[19];
+    return out;
+  }
+  _colorMatrix(matrix) {
+    const m = new Float32Array(matrix);
+    m[4] /= 255;
+    m[9] /= 255;
+    m[14] /= 255;
+    m[19] /= 255;
+    return m;
+  }
+  brightness(b, multiply) {
+    const matrix = [
+      b,
+      0,
+      0,
+      0,
+      0,
+      0,
+      b,
+      0,
+      0,
+      0,
+      0,
+      0,
+      b,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  tint(color, multiply) {
+    const [r, g, b] = Color.shared.setValue(color).toArray();
+    const matrix = [
+      r,
+      0,
+      0,
+      0,
+      0,
+      0,
+      g,
+      0,
+      0,
+      0,
+      0,
+      0,
+      b,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  greyscale(scale, multiply) {
+    const matrix = [
+      scale,
+      scale,
+      scale,
+      0,
+      0,
+      scale,
+      scale,
+      scale,
+      0,
+      0,
+      scale,
+      scale,
+      scale,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  blackAndWhite(multiply) {
+    const matrix = [
+      0.3,
+      0.6,
+      0.1,
+      0,
+      0,
+      0.3,
+      0.6,
+      0.1,
+      0,
+      0,
+      0.3,
+      0.6,
+      0.1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  hue(rotation, multiply) {
+    rotation = (rotation || 0) / 180 * Math.PI;
+    const cosR = Math.cos(rotation);
+    const sinR = Math.sin(rotation);
+    const sqrt = Math.sqrt;
+    const w = 1 / 3;
+    const sqrW = sqrt(w);
+    const a00 = cosR + (1 - cosR) * w;
+    const a01 = w * (1 - cosR) - sqrW * sinR;
+    const a02 = w * (1 - cosR) + sqrW * sinR;
+    const a10 = w * (1 - cosR) + sqrW * sinR;
+    const a11 = cosR + w * (1 - cosR);
+    const a12 = w * (1 - cosR) - sqrW * sinR;
+    const a20 = w * (1 - cosR) - sqrW * sinR;
+    const a21 = w * (1 - cosR) + sqrW * sinR;
+    const a22 = cosR + w * (1 - cosR);
+    const matrix = [
+      a00,
+      a01,
+      a02,
+      0,
+      0,
+      a10,
+      a11,
+      a12,
+      0,
+      0,
+      a20,
+      a21,
+      a22,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  contrast(amount, multiply) {
+    const v = (amount || 0) + 1;
+    const o = -0.5 * (v - 1);
+    const matrix = [
+      v,
+      0,
+      0,
+      0,
+      o,
+      0,
+      v,
+      0,
+      0,
+      o,
+      0,
+      0,
+      v,
+      0,
+      o,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  saturate(amount = 0, multiply) {
+    const x = amount * 2 / 3 + 1;
+    const y = (x - 1) * -0.5;
+    const matrix = [
+      x,
+      y,
+      y,
+      0,
+      0,
+      y,
+      x,
+      y,
+      0,
+      0,
+      y,
+      y,
+      x,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  desaturate() {
+    this.saturate(-1);
+  }
+  negative(multiply) {
+    const matrix = [
+      -1,
+      0,
+      0,
+      1,
+      0,
+      0,
+      -1,
+      0,
+      1,
+      0,
+      0,
+      0,
+      -1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  sepia(multiply) {
+    const matrix = [
+      0.393,
+      0.7689999,
+      0.18899999,
+      0,
+      0,
+      0.349,
+      0.6859999,
+      0.16799999,
+      0,
+      0,
+      0.272,
+      0.5339999,
+      0.13099999,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  technicolor(multiply) {
+    const matrix = [
+      1.9125277891456083,
+      -0.8545344976951645,
+      -0.09155508482755585,
+      0,
+      11.793603434377337,
+      -0.3087833385928097,
+      1.7658908555458428,
+      -0.10601743074722245,
+      0,
+      -70.35205161461398,
+      -0.231103377548616,
+      -0.7501899197440212,
+      1.847597816108189,
+      0,
+      30.950940869491138,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  polaroid(multiply) {
+    const matrix = [
+      1.438,
+      -0.062,
+      -0.062,
+      0,
+      0,
+      -0.122,
+      1.378,
+      -0.122,
+      0,
+      0,
+      -0.016,
+      -0.016,
+      1.483,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  toBGR(multiply) {
+    const matrix = [
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  kodachrome(multiply) {
+    const matrix = [
+      1.1285582396593525,
+      -0.3967382283601348,
+      -0.03992559172921793,
+      0,
+      63.72958762196502,
+      -0.16404339962244616,
+      1.0835251566291304,
+      -0.05498805115633132,
+      0,
+      24.732407896706203,
+      -0.16786010706155763,
+      -0.5603416277695248,
+      1.6014850761964943,
+      0,
+      35.62982807460946,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  browni(multiply) {
+    const matrix = [
+      0.5997023498159715,
+      0.34553243048391263,
+      -0.2708298674538042,
+      0,
+      47.43192855600873,
+      -0.037703249837783157,
+      0.8609577587992641,
+      0.15059552388459913,
+      0,
+      -36.96841498319127,
+      0.24113635128153335,
+      -0.07441037908422492,
+      0.44972182064877153,
+      0,
+      -7.562075277591283,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  vintage(multiply) {
+    const matrix = [
+      0.6279345635605994,
+      0.3202183420819367,
+      -0.03965408211312453,
+      0,
+      9.651285835294123,
+      0.02578397704808868,
+      0.6441188644374771,
+      0.03259127616149294,
+      0,
+      7.462829176470591,
+      0.0466055556782719,
+      -0.0851232987247891,
+      0.5241648018700465,
+      0,
+      5.159190588235296,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  colorTone(desaturation, toned, lightColor, darkColor, multiply) {
+    desaturation = desaturation || 0.2;
+    toned = toned || 0.15;
+    lightColor = lightColor || 16770432;
+    darkColor = darkColor || 3375104;
+    const temp = Color.shared;
+    const [lR, lG, lB] = temp.setValue(lightColor).toArray();
+    const [dR, dG, dB] = temp.setValue(darkColor).toArray();
+    const matrix = [
+      0.3,
+      0.59,
+      0.11,
+      0,
+      0,
+      lR,
+      lG,
+      lB,
+      desaturation,
+      0,
+      dR,
+      dG,
+      dB,
+      toned,
+      0,
+      lR - dR,
+      lG - dG,
+      lB - dB,
+      0,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  night(intensity, multiply) {
+    intensity = intensity || 0.1;
+    const matrix = [
+      intensity * -2,
+      -intensity,
+      0,
+      0,
+      0,
+      -intensity,
+      0,
+      intensity,
+      0,
+      0,
+      0,
+      intensity,
+      intensity * 2,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  predator(amount, multiply) {
+    const matrix = [
+      11.224130630493164 * amount,
+      -4.794486999511719 * amount,
+      -2.8746118545532227 * amount,
+      0 * amount,
+      0.40342438220977783 * amount,
+      -3.6330697536468506 * amount,
+      9.193157196044922 * amount,
+      -2.951810836791992 * amount,
+      0 * amount,
+      -1.316135048866272 * amount,
+      -3.2184197902679443 * amount,
+      -4.2375030517578125 * amount,
+      7.476448059082031 * amount,
+      0 * amount,
+      0.8044459223747253 * amount,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  lsd(multiply) {
+    const matrix = [
+      2,
+      -0.4,
+      0.5,
+      0,
+      0,
+      -0.5,
+      2,
+      -0.4,
+      0,
+      0,
+      -0.4,
+      -0.5,
+      3,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, multiply);
+  }
+  reset() {
+    const matrix = [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ];
+    this._loadMatrix(matrix, false);
+  }
+  get matrix() {
+    return this.uniforms.m;
+  }
+  set matrix(value) {
+    this.uniforms.m = value;
+  }
+  get alpha() {
+    return this.uniforms.uAlpha;
+  }
+  set alpha(value) {
+    this.uniforms.uAlpha = value;
+  }
+}
+ColorMatrixFilter.prototype.grayscale = ColorMatrixFilter.prototype.greyscale;
+
+var fragment$4 = "varying vec2 vFilterCoord;\nvarying vec2 vTextureCoord;\n\nuniform vec2 scale;\nuniform mat2 rotation;\nuniform sampler2D uSampler;\nuniform sampler2D mapSampler;\n\nuniform highp vec4 inputSize;\nuniform vec4 inputClamp;\n\nvoid main(void)\n{\n  vec4 map =  texture2D(mapSampler, vFilterCoord);\n\n  map -= 0.5;\n  map.xy = scale * inputSize.zw * (rotation * map.xy);\n\n  gl_FragColor = texture2D(uSampler, clamp(vec2(vTextureCoord.x + map.x, vTextureCoord.y + map.y), inputClamp.xy, inputClamp.zw));\n}\n";
+
+var vertex$3 = "attribute vec2 aVertexPosition;\n\nuniform mat3 projectionMatrix;\nuniform mat3 filterMatrix;\n\nvarying vec2 vTextureCoord;\nvarying vec2 vFilterCoord;\n\nuniform vec4 inputSize;\nuniform vec4 outputFrame;\n\nvec4 filterVertexPosition( void )\n{\n    vec2 position = aVertexPosition * max(outputFrame.zw, vec2(0.)) + outputFrame.xy;\n\n    return vec4((projectionMatrix * vec3(position, 1.0)).xy, 0.0, 1.0);\n}\n\nvec2 filterTextureCoord( void )\n{\n    return aVertexPosition * (outputFrame.zw * inputSize.zw);\n}\n\nvoid main(void)\n{\n\tgl_Position = filterVertexPosition();\n\tvTextureCoord = filterTextureCoord();\n\tvFilterCoord = ( filterMatrix * vec3( vTextureCoord, 1.0)  ).xy;\n}\n";
+
+class DisplacementFilter extends Filter {
+  constructor(sprite, scale) {
+    const maskMatrix = new Matrix();
+    sprite.renderable = false;
+    super(vertex$3, fragment$4, {
+      mapSampler: sprite._texture,
+      filterMatrix: maskMatrix,
+      scale: { x: 1, y: 1 },
+      rotation: new Float32Array([1, 0, 0, 1])
+    });
+    this.maskSprite = sprite;
+    this.maskMatrix = maskMatrix;
+    if (scale === null || scale === void 0) {
+      scale = 20;
+    }
+    this.scale = new Point(scale, scale);
+  }
+  apply(filterManager, input, output, clearMode) {
+    this.uniforms.filterMatrix = filterManager.calculateSpriteMatrix(this.maskMatrix, this.maskSprite);
+    this.uniforms.scale.x = this.scale.x;
+    this.uniforms.scale.y = this.scale.y;
+    const wt = this.maskSprite.worldTransform;
+    const lenX = Math.sqrt(wt.a * wt.a + wt.b * wt.b);
+    const lenY = Math.sqrt(wt.c * wt.c + wt.d * wt.d);
+    if (lenX !== 0 && lenY !== 0) {
+      this.uniforms.rotation[0] = wt.a / lenX;
+      this.uniforms.rotation[1] = wt.b / lenX;
+      this.uniforms.rotation[2] = wt.c / lenY;
+      this.uniforms.rotation[3] = wt.d / lenY;
+    }
+    filterManager.applyFilter(this, input, output, clearMode);
+  }
+  get map() {
+    return this.uniforms.mapSampler;
+  }
+  set map(value) {
+    this.uniforms.mapSampler = value;
+  }
+}
+
+var fragment$3 = "varying vec2 v_rgbNW;\nvarying vec2 v_rgbNE;\nvarying vec2 v_rgbSW;\nvarying vec2 v_rgbSE;\nvarying vec2 v_rgbM;\n\nvarying vec2 vFragCoord;\nuniform sampler2D uSampler;\nuniform highp vec4 inputSize;\n\n\n/**\n Basic FXAA implementation based on the code on geeks3d.com with the\n modification that the texture2DLod stuff was removed since it's\n unsupported by WebGL.\n\n --\n\n From:\n https://github.com/mitsuhiko/webgl-meincraft\n\n Copyright (c) 2011 by Armin Ronacher.\n\n Some rights reserved.\n\n Redistribution and use in source and binary forms, with or without\n modification, are permitted provided that the following conditions are\n met:\n\n * Redistributions of source code must retain the above copyright\n notice, this list of conditions and the following disclaimer.\n\n * Redistributions in binary form must reproduce the above\n copyright notice, this list of conditions and the following\n disclaimer in the documentation and/or other materials provided\n with the distribution.\n\n * The names of the contributors may not be used to endorse or\n promote products derived from this software without specific\n prior written permission.\n\n THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS\n \"AS IS\" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT\n LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR\n A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT\n OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,\n SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT\n LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,\n DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY\n THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT\n (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE\n OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n */\n\n#ifndef FXAA_REDUCE_MIN\n#define FXAA_REDUCE_MIN   (1.0/ 128.0)\n#endif\n#ifndef FXAA_REDUCE_MUL\n#define FXAA_REDUCE_MUL   (1.0 / 8.0)\n#endif\n#ifndef FXAA_SPAN_MAX\n#define FXAA_SPAN_MAX     8.0\n#endif\n\n//optimized version for mobile, where dependent\n//texture reads can be a bottleneck\nvec4 fxaa(sampler2D tex, vec2 fragCoord, vec2 inverseVP,\n          vec2 v_rgbNW, vec2 v_rgbNE,\n          vec2 v_rgbSW, vec2 v_rgbSE,\n          vec2 v_rgbM) {\n    vec4 color;\n    vec3 rgbNW = texture2D(tex, v_rgbNW).xyz;\n    vec3 rgbNE = texture2D(tex, v_rgbNE).xyz;\n    vec3 rgbSW = texture2D(tex, v_rgbSW).xyz;\n    vec3 rgbSE = texture2D(tex, v_rgbSE).xyz;\n    vec4 texColor = texture2D(tex, v_rgbM);\n    vec3 rgbM  = texColor.xyz;\n    vec3 luma = vec3(0.299, 0.587, 0.114);\n    float lumaNW = dot(rgbNW, luma);\n    float lumaNE = dot(rgbNE, luma);\n    float lumaSW = dot(rgbSW, luma);\n    float lumaSE = dot(rgbSE, luma);\n    float lumaM  = dot(rgbM,  luma);\n    float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));\n    float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));\n\n    mediump vec2 dir;\n    dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));\n    dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));\n\n    float dirReduce = max((lumaNW + lumaNE + lumaSW + lumaSE) *\n                          (0.25 * FXAA_REDUCE_MUL), FXAA_REDUCE_MIN);\n\n    float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);\n    dir = min(vec2(FXAA_SPAN_MAX, FXAA_SPAN_MAX),\n              max(vec2(-FXAA_SPAN_MAX, -FXAA_SPAN_MAX),\n                  dir * rcpDirMin)) * inverseVP;\n\n    vec3 rgbA = 0.5 * (\n                       texture2D(tex, fragCoord * inverseVP + dir * (1.0 / 3.0 - 0.5)).xyz +\n                       texture2D(tex, fragCoord * inverseVP + dir * (2.0 / 3.0 - 0.5)).xyz);\n    vec3 rgbB = rgbA * 0.5 + 0.25 * (\n                                     texture2D(tex, fragCoord * inverseVP + dir * -0.5).xyz +\n                                     texture2D(tex, fragCoord * inverseVP + dir * 0.5).xyz);\n\n    float lumaB = dot(rgbB, luma);\n    if ((lumaB < lumaMin) || (lumaB > lumaMax))\n        color = vec4(rgbA, texColor.a);\n    else\n        color = vec4(rgbB, texColor.a);\n    return color;\n}\n\nvoid main() {\n\n      vec4 color;\n\n      color = fxaa(uSampler, vFragCoord, inputSize.zw, v_rgbNW, v_rgbNE, v_rgbSW, v_rgbSE, v_rgbM);\n\n      gl_FragColor = color;\n}\n";
+
+var vertex$2 = "\nattribute vec2 aVertexPosition;\n\nuniform mat3 projectionMatrix;\n\nvarying vec2 v_rgbNW;\nvarying vec2 v_rgbNE;\nvarying vec2 v_rgbSW;\nvarying vec2 v_rgbSE;\nvarying vec2 v_rgbM;\n\nvarying vec2 vFragCoord;\n\nuniform vec4 inputSize;\nuniform vec4 outputFrame;\n\nvec4 filterVertexPosition( void )\n{\n    vec2 position = aVertexPosition * max(outputFrame.zw, vec2(0.)) + outputFrame.xy;\n\n    return vec4((projectionMatrix * vec3(position, 1.0)).xy, 0.0, 1.0);\n}\n\nvoid texcoords(vec2 fragCoord, vec2 inverseVP,\n               out vec2 v_rgbNW, out vec2 v_rgbNE,\n               out vec2 v_rgbSW, out vec2 v_rgbSE,\n               out vec2 v_rgbM) {\n    v_rgbNW = (fragCoord + vec2(-1.0, -1.0)) * inverseVP;\n    v_rgbNE = (fragCoord + vec2(1.0, -1.0)) * inverseVP;\n    v_rgbSW = (fragCoord + vec2(-1.0, 1.0)) * inverseVP;\n    v_rgbSE = (fragCoord + vec2(1.0, 1.0)) * inverseVP;\n    v_rgbM = vec2(fragCoord * inverseVP);\n}\n\nvoid main(void) {\n\n   gl_Position = filterVertexPosition();\n\n   vFragCoord = aVertexPosition * outputFrame.zw;\n\n   texcoords(vFragCoord, inputSize.zw, v_rgbNW, v_rgbNE, v_rgbSW, v_rgbSE, v_rgbM);\n}\n";
+
+class FXAAFilter extends Filter {
+  constructor() {
+    super(vertex$2, fragment$3);
+  }
+}
+
+var fragment$2 = "precision highp float;\n\nvarying vec2 vTextureCoord;\nvarying vec4 vColor;\n\nuniform float uNoise;\nuniform float uSeed;\nuniform sampler2D uSampler;\n\nfloat rand(vec2 co)\n{\n    return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);\n}\n\nvoid main()\n{\n    vec4 color = texture2D(uSampler, vTextureCoord);\n    float randomValue = rand(gl_FragCoord.xy * uSeed);\n    float diff = (randomValue - 0.5) * uNoise;\n\n    // Un-premultiply alpha before applying the color matrix. See issue #3539.\n    if (color.a > 0.0) {\n        color.rgb /= color.a;\n    }\n\n    color.r += diff;\n    color.g += diff;\n    color.b += diff;\n\n    // Premultiply alpha again.\n    color.rgb *= color.a;\n\n    gl_FragColor = color;\n}\n";
+
+class NoiseFilter extends Filter {
+  constructor(noise = 0.5, seed = Math.random()) {
+    super(defaultFilterVertex, fragment$2, {
+      uNoise: 0,
+      uSeed: 0
+    });
+    this.noise = noise;
+    this.seed = seed;
+  }
+  get noise() {
+    return this.uniforms.uNoise;
+  }
+  set noise(value) {
+    this.uniforms.uNoise = value;
+  }
+  get seed() {
+    return this.uniforms.uSeed;
+  }
+  set seed(value) {
+    this.uniforms.uSeed = value;
+  }
+}
+
+const filters = {
+  AlphaFilter,
+  BlurFilter,
+  BlurFilterPass,
+  ColorMatrixFilter,
+  DisplacementFilter,
+  FXAAFilter,
+  NoiseFilter
+};
+Object.entries(filters).forEach(([key, FilterClass]) => {
+  Object.defineProperty(filters, key, {
+    get() {
+      deprecation("7.1.0", `filters.${key} has moved to ${key}`);
+      return FilterClass;
+    }
+  });
+});
+
+class EventsTickerClass {
+  constructor() {
+    this.interactionFrequency = 10;
+    this._deltaTime = 0;
+    this._didMove = false;
+    this.tickerAdded = false;
+    this._pauseUpdate = true;
+  }
+  init(events) {
+    this.removeTickerListener();
+    this.events = events;
+    this.interactionFrequency = 10;
+    this._deltaTime = 0;
+    this._didMove = false;
+    this.tickerAdded = false;
+    this._pauseUpdate = true;
+  }
+  get pauseUpdate() {
+    return this._pauseUpdate;
+  }
+  set pauseUpdate(paused) {
+    this._pauseUpdate = paused;
+  }
+  addTickerListener() {
+    if (this.tickerAdded || !this.domElement) {
+      return;
+    }
+    Ticker.system.add(this.tickerUpdate, this, UPDATE_PRIORITY.INTERACTION);
+    this.tickerAdded = true;
+  }
+  removeTickerListener() {
+    if (!this.tickerAdded) {
+      return;
+    }
+    Ticker.system.remove(this.tickerUpdate, this);
+    this.tickerAdded = false;
+  }
+  pointerMoved() {
+    this._didMove = true;
+  }
+  update() {
+    if (!this.domElement || this._pauseUpdate) {
+      return;
+    }
+    if (this._didMove) {
+      this._didMove = false;
+      return;
+    }
+    const rootPointerEvent = this.events["rootPointerEvent"];
+    if (this.events.supportsTouchEvents && rootPointerEvent.pointerType === "touch") {
+      return;
+    }
+    globalThis.document.dispatchEvent(new PointerEvent("pointermove", {
+      clientX: rootPointerEvent.clientX,
+      clientY: rootPointerEvent.clientY
+    }));
+  }
+  tickerUpdate(deltaTime) {
+    this._deltaTime += deltaTime;
+    if (this._deltaTime < this.interactionFrequency) {
+      return;
+    }
+    this._deltaTime = 0;
+    this.update();
+  }
+}
+const EventsTicker = new EventsTickerClass();
+
+class FederatedEvent {
+  constructor(manager) {
+    this.bubbles = true;
+    this.cancelBubble = true;
+    this.cancelable = false;
+    this.composed = false;
+    this.defaultPrevented = false;
+    this.eventPhase = FederatedEvent.prototype.NONE;
+    this.propagationStopped = false;
+    this.propagationImmediatelyStopped = false;
+    this.layer = new Point();
+    this.page = new Point();
+    this.NONE = 0;
+    this.CAPTURING_PHASE = 1;
+    this.AT_TARGET = 2;
+    this.BUBBLING_PHASE = 3;
+    this.manager = manager;
+  }
+  get layerX() {
+    return this.layer.x;
+  }
+  get layerY() {
+    return this.layer.y;
+  }
+  get pageX() {
+    return this.page.x;
+  }
+  get pageY() {
+    return this.page.y;
+  }
+  get data() {
+    return this;
+  }
+  composedPath() {
+    if (this.manager && (!this.path || this.path[this.path.length - 1] !== this.target)) {
+      this.path = this.target ? this.manager.propagationPath(this.target) : [];
+    }
+    return this.path;
+  }
+  initEvent(_type, _bubbles, _cancelable) {
+    throw new Error("initEvent() is a legacy DOM API. It is not implemented in the Federated Events API.");
+  }
+  initUIEvent(_typeArg, _bubblesArg, _cancelableArg, _viewArg, _detailArg) {
+    throw new Error("initUIEvent() is a legacy DOM API. It is not implemented in the Federated Events API.");
+  }
+  preventDefault() {
+    if (this.nativeEvent instanceof Event && this.nativeEvent.cancelable) {
+      this.nativeEvent.preventDefault();
+    }
+    this.defaultPrevented = true;
+  }
+  stopImmediatePropagation() {
+    this.propagationImmediatelyStopped = true;
+  }
+  stopPropagation() {
+    this.propagationStopped = true;
+  }
+}
+
+class FederatedMouseEvent extends FederatedEvent {
+  constructor() {
+    super(...arguments);
+    this.client = new Point();
+    this.movement = new Point();
+    this.offset = new Point();
+    this.global = new Point();
+    this.screen = new Point();
+  }
+  get clientX() {
+    return this.client.x;
+  }
+  get clientY() {
+    return this.client.y;
+  }
+  get x() {
+    return this.clientX;
+  }
+  get y() {
+    return this.clientY;
+  }
+  get movementX() {
+    return this.movement.x;
+  }
+  get movementY() {
+    return this.movement.y;
+  }
+  get offsetX() {
+    return this.offset.x;
+  }
+  get offsetY() {
+    return this.offset.y;
+  }
+  get globalX() {
+    return this.global.x;
+  }
+  get globalY() {
+    return this.global.y;
+  }
+  get screenX() {
+    return this.screen.x;
+  }
+  get screenY() {
+    return this.screen.y;
+  }
+  getLocalPosition(displayObject, point, globalPos) {
+    return displayObject.worldTransform.applyInverse(globalPos || this.global, point);
+  }
+  getModifierState(key) {
+    return "getModifierState" in this.nativeEvent && this.nativeEvent.getModifierState(key);
+  }
+  initMouseEvent(_typeArg, _canBubbleArg, _cancelableArg, _viewArg, _detailArg, _screenXArg, _screenYArg, _clientXArg, _clientYArg, _ctrlKeyArg, _altKeyArg, _shiftKeyArg, _metaKeyArg, _buttonArg, _relatedTargetArg) {
+    throw new Error("Method not implemented.");
+  }
+}
+
+class FederatedPointerEvent extends FederatedMouseEvent {
+  constructor() {
+    super(...arguments);
+    this.width = 0;
+    this.height = 0;
+    this.isPrimary = false;
+  }
+  getCoalescedEvents() {
+    if (this.type === "pointermove" || this.type === "mousemove" || this.type === "touchmove") {
+      return [this];
+    }
+    return [];
+  }
+  getPredictedEvents() {
+    throw new Error("getPredictedEvents is not supported!");
+  }
+}
+
+class FederatedWheelEvent extends FederatedMouseEvent {
+  constructor() {
+    super(...arguments);
+    this.DOM_DELTA_PIXEL = 0;
+    this.DOM_DELTA_LINE = 1;
+    this.DOM_DELTA_PAGE = 2;
+  }
+}
+FederatedWheelEvent.DOM_DELTA_PIXEL = 0;
+FederatedWheelEvent.DOM_DELTA_LINE = 1;
+FederatedWheelEvent.DOM_DELTA_PAGE = 2;
+
+const PROPAGATION_LIMIT = 2048;
+const tempHitLocation = new Point();
+const tempLocalMapping = new Point();
+class EventBoundary {
+  constructor(rootTarget) {
+    this.dispatch = new eventemitter3Exports();
+    this.moveOnAll = false;
+    this.enableGlobalMoveEvents = true;
+    this.mappingState = {
+      trackingData: {}
+    };
+    this.eventPool = /* @__PURE__ */ new Map();
+    this._allInteractiveElements = [];
+    this._hitElements = [];
+    this._isPointerMoveEvent = false;
+    this.rootTarget = rootTarget;
+    this.hitPruneFn = this.hitPruneFn.bind(this);
+    this.hitTestFn = this.hitTestFn.bind(this);
+    this.mapPointerDown = this.mapPointerDown.bind(this);
+    this.mapPointerMove = this.mapPointerMove.bind(this);
+    this.mapPointerOut = this.mapPointerOut.bind(this);
+    this.mapPointerOver = this.mapPointerOver.bind(this);
+    this.mapPointerUp = this.mapPointerUp.bind(this);
+    this.mapPointerUpOutside = this.mapPointerUpOutside.bind(this);
+    this.mapWheel = this.mapWheel.bind(this);
+    this.mappingTable = {};
+    this.addEventMapping("pointerdown", this.mapPointerDown);
+    this.addEventMapping("pointermove", this.mapPointerMove);
+    this.addEventMapping("pointerout", this.mapPointerOut);
+    this.addEventMapping("pointerleave", this.mapPointerOut);
+    this.addEventMapping("pointerover", this.mapPointerOver);
+    this.addEventMapping("pointerup", this.mapPointerUp);
+    this.addEventMapping("pointerupoutside", this.mapPointerUpOutside);
+    this.addEventMapping("wheel", this.mapWheel);
+  }
+  addEventMapping(type, fn) {
+    if (!this.mappingTable[type]) {
+      this.mappingTable[type] = [];
+    }
+    this.mappingTable[type].push({
+      fn,
+      priority: 0
+    });
+    this.mappingTable[type].sort((a, b) => a.priority - b.priority);
+  }
+  dispatchEvent(e, type) {
+    e.propagationStopped = false;
+    e.propagationImmediatelyStopped = false;
+    this.propagate(e, type);
+    this.dispatch.emit(type || e.type, e);
+  }
+  mapEvent(e) {
+    if (!this.rootTarget) {
+      return;
+    }
+    const mappers = this.mappingTable[e.type];
+    if (mappers) {
+      for (let i = 0, j = mappers.length; i < j; i++) {
+        mappers[i].fn(e);
+      }
+    } else {
+      console.warn(`[EventBoundary]: Event mapping not defined for ${e.type}`);
+    }
+  }
+  hitTest(x, y) {
+    EventsTicker.pauseUpdate = true;
+    const useMove = this._isPointerMoveEvent && this.enableGlobalMoveEvents;
+    const fn = useMove ? "hitTestMoveRecursive" : "hitTestRecursive";
+    const invertedPath = this[fn](this.rootTarget, this.rootTarget.eventMode, tempHitLocation.set(x, y), this.hitTestFn, this.hitPruneFn);
+    return invertedPath && invertedPath[0];
+  }
+  propagate(e, type) {
+    if (!e.target) {
+      return;
+    }
+    const composedPath = e.composedPath();
+    e.eventPhase = e.CAPTURING_PHASE;
+    for (let i = 0, j = composedPath.length - 1; i < j; i++) {
+      e.currentTarget = composedPath[i];
+      this.notifyTarget(e, type);
+      if (e.propagationStopped || e.propagationImmediatelyStopped)
+        return;
+    }
+    e.eventPhase = e.AT_TARGET;
+    e.currentTarget = e.target;
+    this.notifyTarget(e, type);
+    if (e.propagationStopped || e.propagationImmediatelyStopped)
+      return;
+    e.eventPhase = e.BUBBLING_PHASE;
+    for (let i = composedPath.length - 2; i >= 0; i--) {
+      e.currentTarget = composedPath[i];
+      this.notifyTarget(e, type);
+      if (e.propagationStopped || e.propagationImmediatelyStopped)
+        return;
+    }
+  }
+  all(e, type, targets = this._allInteractiveElements) {
+    if (targets.length === 0)
+      return;
+    e.eventPhase = e.BUBBLING_PHASE;
+    const events = Array.isArray(type) ? type : [type];
+    for (let i = targets.length - 1; i >= 0; i--) {
+      events.forEach((event) => {
+        e.currentTarget = targets[i];
+        this.notifyTarget(e, event);
+      });
+    }
+  }
+  propagationPath(target) {
+    const propagationPath = [target];
+    for (let i = 0; i < PROPAGATION_LIMIT && target !== this.rootTarget; i++) {
+      if (!target.parent) {
+        throw new Error("Cannot find propagation path to disconnected target");
+      }
+      propagationPath.push(target.parent);
+      target = target.parent;
+    }
+    propagationPath.reverse();
+    return propagationPath;
+  }
+  hitTestMoveRecursive(currentTarget, eventMode, location, testFn, pruneFn, ignore = false) {
+    let shouldReturn = false;
+    if (this._interactivePrune(currentTarget))
+      return null;
+    if (currentTarget.eventMode === "dynamic" || eventMode === "dynamic") {
+      EventsTicker.pauseUpdate = false;
+    }
+    if (currentTarget.interactiveChildren && currentTarget.children) {
+      const children = currentTarget.children;
+      for (let i = children.length - 1; i >= 0; i--) {
+        const child = children[i];
+        const nestedHit = this.hitTestMoveRecursive(child, this._isInteractive(eventMode) ? eventMode : child.eventMode, location, testFn, pruneFn, ignore || pruneFn(currentTarget, location));
+        if (nestedHit) {
+          if (nestedHit.length > 0 && !nestedHit[nestedHit.length - 1].parent) {
+            continue;
+          }
+          const isInteractive = currentTarget.isInteractive();
+          if (nestedHit.length > 0 || isInteractive) {
+            if (isInteractive)
+              this._allInteractiveElements.push(currentTarget);
+            nestedHit.push(currentTarget);
+          }
+          if (this._hitElements.length === 0)
+            this._hitElements = nestedHit;
+          shouldReturn = true;
+        }
+      }
+    }
+    const isInteractiveMode = this._isInteractive(eventMode);
+    const isInteractiveTarget = currentTarget.isInteractive();
+    if (isInteractiveTarget && isInteractiveTarget)
+      this._allInteractiveElements.push(currentTarget);
+    if (ignore || this._hitElements.length > 0)
+      return null;
+    if (shouldReturn)
+      return this._hitElements;
+    if (isInteractiveMode && (!pruneFn(currentTarget, location) && testFn(currentTarget, location))) {
+      return isInteractiveTarget ? [currentTarget] : [];
+    }
+    return null;
+  }
+  hitTestRecursive(currentTarget, eventMode, location, testFn, pruneFn) {
+    if (this._interactivePrune(currentTarget) || pruneFn(currentTarget, location)) {
+      return null;
+    }
+    if (currentTarget.eventMode === "dynamic" || eventMode === "dynamic") {
+      EventsTicker.pauseUpdate = false;
+    }
+    if (currentTarget.interactiveChildren && currentTarget.children) {
+      const children = currentTarget.children;
+      for (let i = children.length - 1; i >= 0; i--) {
+        const child = children[i];
+        const nestedHit = this.hitTestRecursive(child, this._isInteractive(eventMode) ? eventMode : child.eventMode, location, testFn, pruneFn);
+        if (nestedHit) {
+          if (nestedHit.length > 0 && !nestedHit[nestedHit.length - 1].parent) {
+            continue;
+          }
+          const isInteractive = currentTarget.isInteractive();
+          if (nestedHit.length > 0 || isInteractive)
+            nestedHit.push(currentTarget);
+          return nestedHit;
+        }
+      }
+    }
+    const isInteractiveMode = this._isInteractive(eventMode);
+    const isInteractiveTarget = currentTarget.isInteractive();
+    if (isInteractiveMode && testFn(currentTarget, location)) {
+      return isInteractiveTarget ? [currentTarget] : [];
+    }
+    return null;
+  }
+  _isInteractive(int) {
+    return int === "static" || int === "dynamic";
+  }
+  _interactivePrune(displayObject) {
+    if (!displayObject || displayObject.isMask || !displayObject.visible || !displayObject.renderable) {
+      return true;
+    }
+    if (displayObject.eventMode === "none") {
+      return true;
+    }
+    if (displayObject.eventMode === "passive" && !displayObject.interactiveChildren) {
+      return true;
+    }
+    if (displayObject.isMask) {
+      return true;
+    }
+    return false;
+  }
+  hitPruneFn(displayObject, location) {
+    if (displayObject.hitArea) {
+      displayObject.worldTransform.applyInverse(location, tempLocalMapping);
+      if (!displayObject.hitArea.contains(tempLocalMapping.x, tempLocalMapping.y)) {
+        return true;
+      }
+    }
+    if (displayObject._mask) {
+      const maskObject = displayObject._mask.isMaskData ? displayObject._mask.maskObject : displayObject._mask;
+      if (maskObject && !maskObject.containsPoint?.(location)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  hitTestFn(displayObject, location) {
+    if (displayObject.eventMode === "passive") {
+      return false;
+    }
+    if (displayObject.hitArea) {
+      return true;
+    }
+    if (displayObject.containsPoint) {
+      return displayObject.containsPoint(location);
+    }
+    return false;
+  }
+  notifyTarget(e, type) {
+    type = type ?? e.type;
+    const handlerKey = `on${type}`;
+    e.currentTarget[handlerKey]?.(e);
+    const key = e.eventPhase === e.CAPTURING_PHASE || e.eventPhase === e.AT_TARGET ? `${type}capture` : type;
+    this.notifyListeners(e, key);
+    if (e.eventPhase === e.AT_TARGET) {
+      this.notifyListeners(e, type);
+    }
+  }
+  mapPointerDown(from) {
+    if (!(from instanceof FederatedPointerEvent)) {
+      console.warn("EventBoundary cannot map a non-pointer event as a pointer event");
+      return;
+    }
+    const e = this.createPointerEvent(from);
+    this.dispatchEvent(e, "pointerdown");
+    if (e.pointerType === "touch") {
+      this.dispatchEvent(e, "touchstart");
+    } else if (e.pointerType === "mouse" || e.pointerType === "pen") {
+      const isRightButton = e.button === 2;
+      this.dispatchEvent(e, isRightButton ? "rightdown" : "mousedown");
+    }
+    const trackingData = this.trackingData(from.pointerId);
+    trackingData.pressTargetsByButton[from.button] = e.composedPath();
+    this.freeEvent(e);
+  }
+  mapPointerMove(from) {
+    if (!(from instanceof FederatedPointerEvent)) {
+      console.warn("EventBoundary cannot map a non-pointer event as a pointer event");
+      return;
+    }
+    this._allInteractiveElements.length = 0;
+    this._hitElements.length = 0;
+    this._isPointerMoveEvent = true;
+    const e = this.createPointerEvent(from);
+    this._isPointerMoveEvent = false;
+    const isMouse = e.pointerType === "mouse" || e.pointerType === "pen";
+    const trackingData = this.trackingData(from.pointerId);
+    const outTarget = this.findMountedTarget(trackingData.overTargets);
+    if (trackingData.overTargets?.length > 0 && outTarget !== e.target) {
+      const outType = from.type === "mousemove" ? "mouseout" : "pointerout";
+      const outEvent = this.createPointerEvent(from, outType, outTarget);
+      this.dispatchEvent(outEvent, "pointerout");
+      if (isMouse)
+        this.dispatchEvent(outEvent, "mouseout");
+      if (!e.composedPath().includes(outTarget)) {
+        const leaveEvent = this.createPointerEvent(from, "pointerleave", outTarget);
+        leaveEvent.eventPhase = leaveEvent.AT_TARGET;
+        while (leaveEvent.target && !e.composedPath().includes(leaveEvent.target)) {
+          leaveEvent.currentTarget = leaveEvent.target;
+          this.notifyTarget(leaveEvent);
+          if (isMouse)
+            this.notifyTarget(leaveEvent, "mouseleave");
+          leaveEvent.target = leaveEvent.target.parent;
+        }
+        this.freeEvent(leaveEvent);
+      }
+      this.freeEvent(outEvent);
+    }
+    if (outTarget !== e.target) {
+      const overType = from.type === "mousemove" ? "mouseover" : "pointerover";
+      const overEvent = this.clonePointerEvent(e, overType);
+      this.dispatchEvent(overEvent, "pointerover");
+      if (isMouse)
+        this.dispatchEvent(overEvent, "mouseover");
+      let overTargetAncestor = outTarget?.parent;
+      while (overTargetAncestor && overTargetAncestor !== this.rootTarget.parent) {
+        if (overTargetAncestor === e.target)
+          break;
+        overTargetAncestor = overTargetAncestor.parent;
+      }
+      const didPointerEnter = !overTargetAncestor || overTargetAncestor === this.rootTarget.parent;
+      if (didPointerEnter) {
+        const enterEvent = this.clonePointerEvent(e, "pointerenter");
+        enterEvent.eventPhase = enterEvent.AT_TARGET;
+        while (enterEvent.target && enterEvent.target !== outTarget && enterEvent.target !== this.rootTarget.parent) {
+          enterEvent.currentTarget = enterEvent.target;
+          this.notifyTarget(enterEvent);
+          if (isMouse)
+            this.notifyTarget(enterEvent, "mouseenter");
+          enterEvent.target = enterEvent.target.parent;
+        }
+        this.freeEvent(enterEvent);
+      }
+      this.freeEvent(overEvent);
+    }
+    const allMethods = [];
+    const allowGlobalPointerEvents = this.enableGlobalMoveEvents ?? true;
+    this.moveOnAll ? allMethods.push("pointermove") : this.dispatchEvent(e, "pointermove");
+    allowGlobalPointerEvents && allMethods.push("globalpointermove");
+    if (e.pointerType === "touch") {
+      this.moveOnAll ? allMethods.splice(1, 0, "touchmove") : this.dispatchEvent(e, "touchmove");
+      allowGlobalPointerEvents && allMethods.push("globaltouchmove");
+    }
+    if (isMouse) {
+      this.moveOnAll ? allMethods.splice(1, 0, "mousemove") : this.dispatchEvent(e, "mousemove");
+      allowGlobalPointerEvents && allMethods.push("globalmousemove");
+      this.cursor = e.target?.cursor;
+    }
+    if (allMethods.length > 0) {
+      this.all(e, allMethods);
+    }
+    this._allInteractiveElements.length = 0;
+    this._hitElements.length = 0;
+    trackingData.overTargets = e.composedPath();
+    this.freeEvent(e);
+  }
+  mapPointerOver(from) {
+    if (!(from instanceof FederatedPointerEvent)) {
+      console.warn("EventBoundary cannot map a non-pointer event as a pointer event");
+      return;
+    }
+    const trackingData = this.trackingData(from.pointerId);
+    const e = this.createPointerEvent(from);
+    const isMouse = e.pointerType === "mouse" || e.pointerType === "pen";
+    this.dispatchEvent(e, "pointerover");
+    if (isMouse)
+      this.dispatchEvent(e, "mouseover");
+    if (e.pointerType === "mouse")
+      this.cursor = e.target?.cursor;
+    const enterEvent = this.clonePointerEvent(e, "pointerenter");
+    enterEvent.eventPhase = enterEvent.AT_TARGET;
+    while (enterEvent.target && enterEvent.target !== this.rootTarget.parent) {
+      enterEvent.currentTarget = enterEvent.target;
+      this.notifyTarget(enterEvent);
+      if (isMouse)
+        this.notifyTarget(enterEvent, "mouseenter");
+      enterEvent.target = enterEvent.target.parent;
+    }
+    trackingData.overTargets = e.composedPath();
+    this.freeEvent(e);
+    this.freeEvent(enterEvent);
+  }
+  mapPointerOut(from) {
+    if (!(from instanceof FederatedPointerEvent)) {
+      console.warn("EventBoundary cannot map a non-pointer event as a pointer event");
+      return;
+    }
+    const trackingData = this.trackingData(from.pointerId);
+    if (trackingData.overTargets) {
+      const isMouse = from.pointerType === "mouse" || from.pointerType === "pen";
+      const outTarget = this.findMountedTarget(trackingData.overTargets);
+      const outEvent = this.createPointerEvent(from, "pointerout", outTarget);
+      this.dispatchEvent(outEvent);
+      if (isMouse)
+        this.dispatchEvent(outEvent, "mouseout");
+      const leaveEvent = this.createPointerEvent(from, "pointerleave", outTarget);
+      leaveEvent.eventPhase = leaveEvent.AT_TARGET;
+      while (leaveEvent.target && leaveEvent.target !== this.rootTarget.parent) {
+        leaveEvent.currentTarget = leaveEvent.target;
+        this.notifyTarget(leaveEvent);
+        if (isMouse)
+          this.notifyTarget(leaveEvent, "mouseleave");
+        leaveEvent.target = leaveEvent.target.parent;
+      }
+      trackingData.overTargets = null;
+      this.freeEvent(outEvent);
+      this.freeEvent(leaveEvent);
+    }
+    this.cursor = null;
+  }
+  mapPointerUp(from) {
+    if (!(from instanceof FederatedPointerEvent)) {
+      console.warn("EventBoundary cannot map a non-pointer event as a pointer event");
+      return;
+    }
+    const now = performance.now();
+    const e = this.createPointerEvent(from);
+    this.dispatchEvent(e, "pointerup");
+    if (e.pointerType === "touch") {
+      this.dispatchEvent(e, "touchend");
+    } else if (e.pointerType === "mouse" || e.pointerType === "pen") {
+      const isRightButton = e.button === 2;
+      this.dispatchEvent(e, isRightButton ? "rightup" : "mouseup");
+    }
+    const trackingData = this.trackingData(from.pointerId);
+    const pressTarget = this.findMountedTarget(trackingData.pressTargetsByButton[from.button]);
+    let clickTarget = pressTarget;
+    if (pressTarget && !e.composedPath().includes(pressTarget)) {
+      let currentTarget = pressTarget;
+      while (currentTarget && !e.composedPath().includes(currentTarget)) {
+        e.currentTarget = currentTarget;
+        this.notifyTarget(e, "pointerupoutside");
+        if (e.pointerType === "touch") {
+          this.notifyTarget(e, "touchendoutside");
+        } else if (e.pointerType === "mouse" || e.pointerType === "pen") {
+          const isRightButton = e.button === 2;
+          this.notifyTarget(e, isRightButton ? "rightupoutside" : "mouseupoutside");
+        }
+        currentTarget = currentTarget.parent;
+      }
+      delete trackingData.pressTargetsByButton[from.button];
+      clickTarget = currentTarget;
+    }
+    if (clickTarget) {
+      const clickEvent = this.clonePointerEvent(e, "click");
+      clickEvent.target = clickTarget;
+      clickEvent.path = null;
+      if (!trackingData.clicksByButton[from.button]) {
+        trackingData.clicksByButton[from.button] = {
+          clickCount: 0,
+          target: clickEvent.target,
+          timeStamp: now
+        };
+      }
+      const clickHistory = trackingData.clicksByButton[from.button];
+      if (clickHistory.target === clickEvent.target && now - clickHistory.timeStamp < 200) {
+        ++clickHistory.clickCount;
+      } else {
+        clickHistory.clickCount = 1;
+      }
+      clickHistory.target = clickEvent.target;
+      clickHistory.timeStamp = now;
+      clickEvent.detail = clickHistory.clickCount;
+      if (clickEvent.pointerType === "mouse") {
+        const isRightButton = clickEvent.button === 2;
+        this.dispatchEvent(clickEvent, isRightButton ? "rightclick" : "click");
+      } else if (clickEvent.pointerType === "touch") {
+        this.dispatchEvent(clickEvent, "tap");
+      }
+      this.dispatchEvent(clickEvent, "pointertap");
+      this.freeEvent(clickEvent);
+    }
+    this.freeEvent(e);
+  }
+  mapPointerUpOutside(from) {
+    if (!(from instanceof FederatedPointerEvent)) {
+      console.warn("EventBoundary cannot map a non-pointer event as a pointer event");
+      return;
+    }
+    const trackingData = this.trackingData(from.pointerId);
+    const pressTarget = this.findMountedTarget(trackingData.pressTargetsByButton[from.button]);
+    const e = this.createPointerEvent(from);
+    if (pressTarget) {
+      let currentTarget = pressTarget;
+      while (currentTarget) {
+        e.currentTarget = currentTarget;
+        this.notifyTarget(e, "pointerupoutside");
+        if (e.pointerType === "touch") {
+          this.notifyTarget(e, "touchendoutside");
+        } else if (e.pointerType === "mouse" || e.pointerType === "pen") {
+          this.notifyTarget(e, e.button === 2 ? "rightupoutside" : "mouseupoutside");
+        }
+        currentTarget = currentTarget.parent;
+      }
+      delete trackingData.pressTargetsByButton[from.button];
+    }
+    this.freeEvent(e);
+  }
+  mapWheel(from) {
+    if (!(from instanceof FederatedWheelEvent)) {
+      console.warn("EventBoundary cannot map a non-wheel event as a wheel event");
+      return;
+    }
+    const wheelEvent = this.createWheelEvent(from);
+    this.dispatchEvent(wheelEvent);
+    this.freeEvent(wheelEvent);
+  }
+  findMountedTarget(propagationPath) {
+    if (!propagationPath) {
+      return null;
+    }
+    let currentTarget = propagationPath[0];
+    for (let i = 1; i < propagationPath.length; i++) {
+      if (propagationPath[i].parent === currentTarget) {
+        currentTarget = propagationPath[i];
+      } else {
+        break;
+      }
+    }
+    return currentTarget;
+  }
+  createPointerEvent(from, type, target) {
+    const event = this.allocateEvent(FederatedPointerEvent);
+    this.copyPointerData(from, event);
+    this.copyMouseData(from, event);
+    this.copyData(from, event);
+    event.nativeEvent = from.nativeEvent;
+    event.originalEvent = from;
+    event.target = target ?? this.hitTest(event.global.x, event.global.y) ?? this._hitElements[0];
+    if (typeof type === "string") {
+      event.type = type;
+    }
+    return event;
+  }
+  createWheelEvent(from) {
+    const event = this.allocateEvent(FederatedWheelEvent);
+    this.copyWheelData(from, event);
+    this.copyMouseData(from, event);
+    this.copyData(from, event);
+    event.nativeEvent = from.nativeEvent;
+    event.originalEvent = from;
+    event.target = this.hitTest(event.global.x, event.global.y);
+    return event;
+  }
+  clonePointerEvent(from, type) {
+    const event = this.allocateEvent(FederatedPointerEvent);
+    event.nativeEvent = from.nativeEvent;
+    event.originalEvent = from.originalEvent;
+    this.copyPointerData(from, event);
+    this.copyMouseData(from, event);
+    this.copyData(from, event);
+    event.target = from.target;
+    event.path = from.composedPath().slice();
+    event.type = type ?? event.type;
+    return event;
+  }
+  copyWheelData(from, to) {
+    to.deltaMode = from.deltaMode;
+    to.deltaX = from.deltaX;
+    to.deltaY = from.deltaY;
+    to.deltaZ = from.deltaZ;
+  }
+  copyPointerData(from, to) {
+    if (!(from instanceof FederatedPointerEvent && to instanceof FederatedPointerEvent))
+      return;
+    to.pointerId = from.pointerId;
+    to.width = from.width;
+    to.height = from.height;
+    to.isPrimary = from.isPrimary;
+    to.pointerType = from.pointerType;
+    to.pressure = from.pressure;
+    to.tangentialPressure = from.tangentialPressure;
+    to.tiltX = from.tiltX;
+    to.tiltY = from.tiltY;
+    to.twist = from.twist;
+  }
+  copyMouseData(from, to) {
+    if (!(from instanceof FederatedMouseEvent && to instanceof FederatedMouseEvent))
+      return;
+    to.altKey = from.altKey;
+    to.button = from.button;
+    to.buttons = from.buttons;
+    to.client.copyFrom(from.client);
+    to.ctrlKey = from.ctrlKey;
+    to.metaKey = from.metaKey;
+    to.movement.copyFrom(from.movement);
+    to.screen.copyFrom(from.screen);
+    to.shiftKey = from.shiftKey;
+    to.global.copyFrom(from.global);
+  }
+  copyData(from, to) {
+    to.isTrusted = from.isTrusted;
+    to.srcElement = from.srcElement;
+    to.timeStamp = performance.now();
+    to.type = from.type;
+    to.detail = from.detail;
+    to.view = from.view;
+    to.which = from.which;
+    to.layer.copyFrom(from.layer);
+    to.page.copyFrom(from.page);
+  }
+  trackingData(id) {
+    if (!this.mappingState.trackingData[id]) {
+      this.mappingState.trackingData[id] = {
+        pressTargetsByButton: {},
+        clicksByButton: {},
+        overTarget: null
+      };
+    }
+    return this.mappingState.trackingData[id];
+  }
+  allocateEvent(constructor) {
+    if (!this.eventPool.has(constructor)) {
+      this.eventPool.set(constructor, []);
+    }
+    const event = this.eventPool.get(constructor).pop() || new constructor(this);
+    event.eventPhase = event.NONE;
+    event.currentTarget = null;
+    event.path = null;
+    event.target = null;
+    return event;
+  }
+  freeEvent(event) {
+    if (event.manager !== this)
+      throw new Error("It is illegal to free an event not managed by this EventBoundary!");
+    const constructor = event.constructor;
+    if (!this.eventPool.has(constructor)) {
+      this.eventPool.set(constructor, []);
+    }
+    this.eventPool.get(constructor).push(event);
+  }
+  notifyListeners(e, type) {
+    const listeners = e.currentTarget._events[type];
+    if (!listeners)
+      return;
+    if (!e.currentTarget.isInteractive())
+      return;
+    if ("fn" in listeners) {
+      if (listeners.once)
+        e.currentTarget.removeListener(type, listeners.fn, void 0, true);
+      listeners.fn.call(listeners.context, e);
+    } else {
+      for (let i = 0, j = listeners.length; i < j && !e.propagationImmediatelyStopped; i++) {
+        if (listeners[i].once)
+          e.currentTarget.removeListener(type, listeners[i].fn, void 0, true);
+        listeners[i].fn.call(listeners[i].context, e);
+      }
+    }
+  }
+}
+
+const MOUSE_POINTER_ID = 1;
+const TOUCH_TO_POINTER = {
+  touchstart: "pointerdown",
+  touchend: "pointerup",
+  touchendoutside: "pointerupoutside",
+  touchmove: "pointermove",
+  touchcancel: "pointercancel"
+};
+const _EventSystem = class {
+  constructor(renderer) {
+    this.supportsTouchEvents = "ontouchstart" in globalThis;
+    this.supportsPointerEvents = !!globalThis.PointerEvent;
+    this.domElement = null;
+    this.resolution = 1;
+    this.renderer = renderer;
+    this.rootBoundary = new EventBoundary(null);
+    EventsTicker.init(this);
+    this.autoPreventDefault = true;
+    this.eventsAdded = false;
+    this.rootPointerEvent = new FederatedPointerEvent(null);
+    this.rootWheelEvent = new FederatedWheelEvent(null);
+    this.cursorStyles = {
+      default: "inherit",
+      pointer: "pointer"
+    };
+    this.features = new Proxy({ ..._EventSystem.defaultEventFeatures }, {
+      set: (target, key, value) => {
+        if (key === "globalMove") {
+          this.rootBoundary.enableGlobalMoveEvents = value;
+        }
+        target[key] = value;
+        return true;
+      }
+    });
+    this.onPointerDown = this.onPointerDown.bind(this);
+    this.onPointerMove = this.onPointerMove.bind(this);
+    this.onPointerUp = this.onPointerUp.bind(this);
+    this.onPointerOverOut = this.onPointerOverOut.bind(this);
+    this.onWheel = this.onWheel.bind(this);
+  }
+  static get defaultEventMode() {
+    return this._defaultEventMode;
+  }
+  init(options) {
+    const { view, resolution } = this.renderer;
+    this.setTargetElement(view);
+    this.resolution = resolution;
+    _EventSystem._defaultEventMode = options.eventMode ?? "auto";
+    Object.assign(this.features, options.eventFeatures ?? {});
+    this.rootBoundary.enableGlobalMoveEvents = this.features.globalMove;
+  }
+  resolutionChange(resolution) {
+    this.resolution = resolution;
+  }
+  destroy() {
+    this.setTargetElement(null);
+    this.renderer = null;
+  }
+  setCursor(mode) {
+    mode = mode || "default";
+    let applyStyles = true;
+    if (globalThis.OffscreenCanvas && this.domElement instanceof OffscreenCanvas) {
+      applyStyles = false;
+    }
+    if (this.currentCursor === mode) {
+      return;
+    }
+    this.currentCursor = mode;
+    const style = this.cursorStyles[mode];
+    if (style) {
+      switch (typeof style) {
+        case "string":
+          if (applyStyles) {
+            this.domElement.style.cursor = style;
+          }
+          break;
+        case "function":
+          style(mode);
+          break;
+        case "object":
+          if (applyStyles) {
+            Object.assign(this.domElement.style, style);
+          }
+          break;
+      }
+    } else if (applyStyles && typeof mode === "string" && !Object.prototype.hasOwnProperty.call(this.cursorStyles, mode)) {
+      this.domElement.style.cursor = mode;
+    }
+  }
+  get pointer() {
+    return this.rootPointerEvent;
+  }
+  onPointerDown(nativeEvent) {
+    if (!this.features.click)
+      return;
+    this.rootBoundary.rootTarget = this.renderer.lastObjectRendered;
+    if (this.supportsTouchEvents && nativeEvent.pointerType === "touch")
+      return;
+    const events = this.normalizeToPointerData(nativeEvent);
+    if (this.autoPreventDefault && events[0].isNormalized) {
+      const cancelable = nativeEvent.cancelable || !("cancelable" in nativeEvent);
+      if (cancelable) {
+        nativeEvent.preventDefault();
+      }
+    }
+    for (let i = 0, j = events.length; i < j; i++) {
+      const nativeEvent2 = events[i];
+      const federatedEvent = this.bootstrapEvent(this.rootPointerEvent, nativeEvent2);
+      this.rootBoundary.mapEvent(federatedEvent);
+    }
+    this.setCursor(this.rootBoundary.cursor);
+  }
+  onPointerMove(nativeEvent) {
+    if (!this.features.move)
+      return;
+    this.rootBoundary.rootTarget = this.renderer.lastObjectRendered;
+    if (this.supportsTouchEvents && nativeEvent.pointerType === "touch")
+      return;
+    EventsTicker.pointerMoved();
+    const normalizedEvents = this.normalizeToPointerData(nativeEvent);
+    for (let i = 0, j = normalizedEvents.length; i < j; i++) {
+      const event = this.bootstrapEvent(this.rootPointerEvent, normalizedEvents[i]);
+      this.rootBoundary.mapEvent(event);
+    }
+    this.setCursor(this.rootBoundary.cursor);
+  }
+  onPointerUp(nativeEvent) {
+    if (!this.features.click)
+      return;
+    this.rootBoundary.rootTarget = this.renderer.lastObjectRendered;
+    if (this.supportsTouchEvents && nativeEvent.pointerType === "touch")
+      return;
+    let target = nativeEvent.target;
+    if (nativeEvent.composedPath && nativeEvent.composedPath().length > 0) {
+      target = nativeEvent.composedPath()[0];
+    }
+    const outside = target !== this.domElement ? "outside" : "";
+    const normalizedEvents = this.normalizeToPointerData(nativeEvent);
+    for (let i = 0, j = normalizedEvents.length; i < j; i++) {
+      const event = this.bootstrapEvent(this.rootPointerEvent, normalizedEvents[i]);
+      event.type += outside;
+      this.rootBoundary.mapEvent(event);
+    }
+    this.setCursor(this.rootBoundary.cursor);
+  }
+  onPointerOverOut(nativeEvent) {
+    if (!this.features.click)
+      return;
+    this.rootBoundary.rootTarget = this.renderer.lastObjectRendered;
+    if (this.supportsTouchEvents && nativeEvent.pointerType === "touch")
+      return;
+    const normalizedEvents = this.normalizeToPointerData(nativeEvent);
+    for (let i = 0, j = normalizedEvents.length; i < j; i++) {
+      const event = this.bootstrapEvent(this.rootPointerEvent, normalizedEvents[i]);
+      this.rootBoundary.mapEvent(event);
+    }
+    this.setCursor(this.rootBoundary.cursor);
+  }
+  onWheel(nativeEvent) {
+    if (!this.features.wheel)
+      return;
+    const wheelEvent = this.normalizeWheelEvent(nativeEvent);
+    this.rootBoundary.rootTarget = this.renderer.lastObjectRendered;
+    this.rootBoundary.mapEvent(wheelEvent);
+  }
+  setTargetElement(element) {
+    this.removeEvents();
+    this.domElement = element;
+    EventsTicker.domElement = element;
+    this.addEvents();
+  }
+  addEvents() {
+    if (this.eventsAdded || !this.domElement) {
+      return;
+    }
+    EventsTicker.addTickerListener();
+    const style = this.domElement.style;
+    if (style) {
+      if (globalThis.navigator.msPointerEnabled) {
+        style.msContentZooming = "none";
+        style.msTouchAction = "none";
+      } else if (this.supportsPointerEvents) {
+        style.touchAction = "none";
+      }
+    }
+    if (this.supportsPointerEvents) {
+      globalThis.document.addEventListener("pointermove", this.onPointerMove, true);
+      this.domElement.addEventListener("pointerdown", this.onPointerDown, true);
+      this.domElement.addEventListener("pointerleave", this.onPointerOverOut, true);
+      this.domElement.addEventListener("pointerover", this.onPointerOverOut, true);
+      globalThis.addEventListener("pointerup", this.onPointerUp, true);
+    } else {
+      globalThis.document.addEventListener("mousemove", this.onPointerMove, true);
+      this.domElement.addEventListener("mousedown", this.onPointerDown, true);
+      this.domElement.addEventListener("mouseout", this.onPointerOverOut, true);
+      this.domElement.addEventListener("mouseover", this.onPointerOverOut, true);
+      globalThis.addEventListener("mouseup", this.onPointerUp, true);
+    }
+    if (this.supportsTouchEvents) {
+      this.domElement.addEventListener("touchstart", this.onPointerDown, true);
+      this.domElement.addEventListener("touchend", this.onPointerUp, true);
+      this.domElement.addEventListener("touchmove", this.onPointerMove, true);
+    }
+    this.domElement.addEventListener("wheel", this.onWheel, {
+      passive: true,
+      capture: true
+    });
+    this.eventsAdded = true;
+  }
+  removeEvents() {
+    if (!this.eventsAdded || !this.domElement) {
+      return;
+    }
+    EventsTicker.removeTickerListener();
+    const style = this.domElement.style;
+    if (globalThis.navigator.msPointerEnabled) {
+      style.msContentZooming = "";
+      style.msTouchAction = "";
+    } else if (this.supportsPointerEvents) {
+      style.touchAction = "";
+    }
+    if (this.supportsPointerEvents) {
+      globalThis.document.removeEventListener("pointermove", this.onPointerMove, true);
+      this.domElement.removeEventListener("pointerdown", this.onPointerDown, true);
+      this.domElement.removeEventListener("pointerleave", this.onPointerOverOut, true);
+      this.domElement.removeEventListener("pointerover", this.onPointerOverOut, true);
+      globalThis.removeEventListener("pointerup", this.onPointerUp, true);
+    } else {
+      globalThis.document.removeEventListener("mousemove", this.onPointerMove, true);
+      this.domElement.removeEventListener("mousedown", this.onPointerDown, true);
+      this.domElement.removeEventListener("mouseout", this.onPointerOverOut, true);
+      this.domElement.removeEventListener("mouseover", this.onPointerOverOut, true);
+      globalThis.removeEventListener("mouseup", this.onPointerUp, true);
+    }
+    if (this.supportsTouchEvents) {
+      this.domElement.removeEventListener("touchstart", this.onPointerDown, true);
+      this.domElement.removeEventListener("touchend", this.onPointerUp, true);
+      this.domElement.removeEventListener("touchmove", this.onPointerMove, true);
+    }
+    this.domElement.removeEventListener("wheel", this.onWheel, true);
+    this.domElement = null;
+    this.eventsAdded = false;
+  }
+  mapPositionToPoint(point, x, y) {
+    let rect;
+    if (!this.domElement.parentElement) {
+      rect = {
+        x: 0,
+        y: 0,
+        width: this.domElement.width,
+        height: this.domElement.height,
+        left: 0,
+        top: 0
+      };
+    } else {
+      rect = this.domElement.getBoundingClientRect();
+    }
+    const resolutionMultiplier = 1 / this.resolution;
+    point.x = (x - rect.left) * (this.domElement.width / rect.width) * resolutionMultiplier;
+    point.y = (y - rect.top) * (this.domElement.height / rect.height) * resolutionMultiplier;
+  }
+  normalizeToPointerData(event) {
+    const normalizedEvents = [];
+    if (this.supportsTouchEvents && event instanceof TouchEvent) {
+      for (let i = 0, li = event.changedTouches.length; i < li; i++) {
+        const touch = event.changedTouches[i];
+        if (typeof touch.button === "undefined")
+          touch.button = 0;
+        if (typeof touch.buttons === "undefined")
+          touch.buttons = 1;
+        if (typeof touch.isPrimary === "undefined") {
+          touch.isPrimary = event.touches.length === 1 && event.type === "touchstart";
+        }
+        if (typeof touch.width === "undefined")
+          touch.width = touch.radiusX || 1;
+        if (typeof touch.height === "undefined")
+          touch.height = touch.radiusY || 1;
+        if (typeof touch.tiltX === "undefined")
+          touch.tiltX = 0;
+        if (typeof touch.tiltY === "undefined")
+          touch.tiltY = 0;
+        if (typeof touch.pointerType === "undefined")
+          touch.pointerType = "touch";
+        if (typeof touch.pointerId === "undefined")
+          touch.pointerId = touch.identifier || 0;
+        if (typeof touch.pressure === "undefined")
+          touch.pressure = touch.force || 0.5;
+        if (typeof touch.twist === "undefined")
+          touch.twist = 0;
+        if (typeof touch.tangentialPressure === "undefined")
+          touch.tangentialPressure = 0;
+        if (typeof touch.layerX === "undefined")
+          touch.layerX = touch.offsetX = touch.clientX;
+        if (typeof touch.layerY === "undefined")
+          touch.layerY = touch.offsetY = touch.clientY;
+        touch.isNormalized = true;
+        touch.type = event.type;
+        normalizedEvents.push(touch);
+      }
+    } else if (!globalThis.MouseEvent || event instanceof MouseEvent && (!this.supportsPointerEvents || !(event instanceof globalThis.PointerEvent))) {
+      const tempEvent = event;
+      if (typeof tempEvent.isPrimary === "undefined")
+        tempEvent.isPrimary = true;
+      if (typeof tempEvent.width === "undefined")
+        tempEvent.width = 1;
+      if (typeof tempEvent.height === "undefined")
+        tempEvent.height = 1;
+      if (typeof tempEvent.tiltX === "undefined")
+        tempEvent.tiltX = 0;
+      if (typeof tempEvent.tiltY === "undefined")
+        tempEvent.tiltY = 0;
+      if (typeof tempEvent.pointerType === "undefined")
+        tempEvent.pointerType = "mouse";
+      if (typeof tempEvent.pointerId === "undefined")
+        tempEvent.pointerId = MOUSE_POINTER_ID;
+      if (typeof tempEvent.pressure === "undefined")
+        tempEvent.pressure = 0.5;
+      if (typeof tempEvent.twist === "undefined")
+        tempEvent.twist = 0;
+      if (typeof tempEvent.tangentialPressure === "undefined")
+        tempEvent.tangentialPressure = 0;
+      tempEvent.isNormalized = true;
+      normalizedEvents.push(tempEvent);
+    } else {
+      normalizedEvents.push(event);
+    }
+    return normalizedEvents;
+  }
+  normalizeWheelEvent(nativeEvent) {
+    const event = this.rootWheelEvent;
+    this.transferMouseData(event, nativeEvent);
+    event.deltaX = nativeEvent.deltaX;
+    event.deltaY = nativeEvent.deltaY;
+    event.deltaZ = nativeEvent.deltaZ;
+    event.deltaMode = nativeEvent.deltaMode;
+    this.mapPositionToPoint(event.screen, nativeEvent.clientX, nativeEvent.clientY);
+    event.global.copyFrom(event.screen);
+    event.offset.copyFrom(event.screen);
+    event.nativeEvent = nativeEvent;
+    event.type = nativeEvent.type;
+    return event;
+  }
+  bootstrapEvent(event, nativeEvent) {
+    event.originalEvent = null;
+    event.nativeEvent = nativeEvent;
+    event.pointerId = nativeEvent.pointerId;
+    event.width = nativeEvent.width;
+    event.height = nativeEvent.height;
+    event.isPrimary = nativeEvent.isPrimary;
+    event.pointerType = nativeEvent.pointerType;
+    event.pressure = nativeEvent.pressure;
+    event.tangentialPressure = nativeEvent.tangentialPressure;
+    event.tiltX = nativeEvent.tiltX;
+    event.tiltY = nativeEvent.tiltY;
+    event.twist = nativeEvent.twist;
+    this.transferMouseData(event, nativeEvent);
+    this.mapPositionToPoint(event.screen, nativeEvent.clientX, nativeEvent.clientY);
+    event.global.copyFrom(event.screen);
+    event.offset.copyFrom(event.screen);
+    event.isTrusted = nativeEvent.isTrusted;
+    if (event.type === "pointerleave") {
+      event.type = "pointerout";
+    }
+    if (event.type.startsWith("mouse")) {
+      event.type = event.type.replace("mouse", "pointer");
+    }
+    if (event.type.startsWith("touch")) {
+      event.type = TOUCH_TO_POINTER[event.type] || event.type;
+    }
+    return event;
+  }
+  transferMouseData(event, nativeEvent) {
+    event.isTrusted = nativeEvent.isTrusted;
+    event.srcElement = nativeEvent.srcElement;
+    event.timeStamp = performance.now();
+    event.type = nativeEvent.type;
+    event.altKey = nativeEvent.altKey;
+    event.button = nativeEvent.button;
+    event.buttons = nativeEvent.buttons;
+    event.client.x = nativeEvent.clientX;
+    event.client.y = nativeEvent.clientY;
+    event.ctrlKey = nativeEvent.ctrlKey;
+    event.metaKey = nativeEvent.metaKey;
+    event.movement.x = nativeEvent.movementX;
+    event.movement.y = nativeEvent.movementY;
+    event.page.x = nativeEvent.pageX;
+    event.page.y = nativeEvent.pageY;
+    event.relatedTarget = null;
+    event.shiftKey = nativeEvent.shiftKey;
+  }
+};
+let EventSystem = _EventSystem;
+EventSystem.extension = {
+  name: "events",
+  type: [
+    ExtensionType.RendererSystem,
+    ExtensionType.CanvasRendererSystem
+  ]
+};
+EventSystem.defaultEventFeatures = {
+  move: true,
+  globalMove: true,
+  click: true,
+  wheel: true
+};
+extensions$1.add(EventSystem);
+
+function convertEventModeToInteractiveMode(mode) {
+  return mode === "dynamic" || mode === "static";
+}
+const FederatedDisplayObject = {
+  onclick: null,
+  onmousedown: null,
+  onmouseenter: null,
+  onmouseleave: null,
+  onmousemove: null,
+  onglobalmousemove: null,
+  onmouseout: null,
+  onmouseover: null,
+  onmouseup: null,
+  onmouseupoutside: null,
+  onpointercancel: null,
+  onpointerdown: null,
+  onpointerenter: null,
+  onpointerleave: null,
+  onpointermove: null,
+  onglobalpointermove: null,
+  onpointerout: null,
+  onpointerover: null,
+  onpointertap: null,
+  onpointerup: null,
+  onpointerupoutside: null,
+  onrightclick: null,
+  onrightdown: null,
+  onrightup: null,
+  onrightupoutside: null,
+  ontap: null,
+  ontouchcancel: null,
+  ontouchend: null,
+  ontouchendoutside: null,
+  ontouchmove: null,
+  onglobaltouchmove: null,
+  ontouchstart: null,
+  onwheel: null,
+  _internalInteractive: void 0,
+  get interactive() {
+    return this._internalInteractive ?? convertEventModeToInteractiveMode(EventSystem.defaultEventMode);
+  },
+  set interactive(value) {
+    deprecation("7.2.0", `Setting interactive is deprecated, use eventMode = 'none'/'passive'/'auto'/'static'/'dynamic' instead.`);
+    this._internalInteractive = value;
+    this.eventMode = value ? "static" : "auto";
+  },
+  _internalEventMode: void 0,
+  get eventMode() {
+    return this._internalEventMode ?? EventSystem.defaultEventMode;
+  },
+  set eventMode(value) {
+    this._internalInteractive = convertEventModeToInteractiveMode(value);
+    this._internalEventMode = value;
+  },
+  isInteractive() {
+    return this.eventMode === "static" || this.eventMode === "dynamic";
+  },
+  interactiveChildren: true,
+  hitArea: null,
+  addEventListener(type, listener, options) {
+    const capture = typeof options === "boolean" && options || typeof options === "object" && options.capture;
+    const context = typeof listener === "function" ? void 0 : listener;
+    type = capture ? `${type}capture` : type;
+    listener = typeof listener === "function" ? listener : listener.handleEvent;
+    this.on(type, listener, context);
+  },
+  removeEventListener(type, listener, options) {
+    const capture = typeof options === "boolean" && options || typeof options === "object" && options.capture;
+    const context = typeof listener === "function" ? void 0 : listener;
+    type = capture ? `${type}capture` : type;
+    listener = typeof listener === "function" ? listener : listener.handleEvent;
+    this.off(type, listener, context);
+  },
+  dispatchEvent(e) {
+    if (!(e instanceof FederatedEvent)) {
+      throw new Error("DisplayObject cannot propagate events outside of the Federated Events API");
+    }
+    e.defaultPrevented = false;
+    e.path = null;
+    e.target = this;
+    e.manager.dispatchEvent(e);
+    return !e.defaultPrevented;
+  }
+};
+DisplayObject.mixin(FederatedDisplayObject);
+
+const accessibleTarget = {
+  accessible: false,
+  accessibleTitle: null,
+  accessibleHint: null,
+  tabIndex: 0,
+  _accessibleActive: false,
+  _accessibleDiv: null,
+  accessibleType: "button",
+  accessiblePointerEvents: "auto",
+  accessibleChildren: true,
+  renderId: -1
+};
+
+DisplayObject.mixin(accessibleTarget);
+const KEY_CODE_TAB = 9;
+const DIV_TOUCH_SIZE = 100;
+const DIV_TOUCH_POS_X = 0;
+const DIV_TOUCH_POS_Y = 0;
+const DIV_TOUCH_ZINDEX = 2;
+const DIV_HOOK_SIZE = 1;
+const DIV_HOOK_POS_X = -1e3;
+const DIV_HOOK_POS_Y = -1e3;
+const DIV_HOOK_ZINDEX = 2;
+class AccessibilityManager {
+  constructor(renderer) {
+    this.debug = false;
+    this._isActive = false;
+    this._isMobileAccessibility = false;
+    this.pool = [];
+    this.renderId = 0;
+    this.children = [];
+    this.androidUpdateCount = 0;
+    this.androidUpdateFrequency = 500;
+    this._hookDiv = null;
+    if (isMobile.tablet || isMobile.phone) {
+      this.createTouchHook();
+    }
+    const div = document.createElement("div");
+    div.style.width = `${DIV_TOUCH_SIZE}px`;
+    div.style.height = `${DIV_TOUCH_SIZE}px`;
+    div.style.position = "absolute";
+    div.style.top = `${DIV_TOUCH_POS_X}px`;
+    div.style.left = `${DIV_TOUCH_POS_Y}px`;
+    div.style.zIndex = DIV_TOUCH_ZINDEX.toString();
+    this.div = div;
+    this.renderer = renderer;
+    this._onKeyDown = this._onKeyDown.bind(this);
+    this._onMouseMove = this._onMouseMove.bind(this);
+    globalThis.addEventListener("keydown", this._onKeyDown, false);
+  }
+  get isActive() {
+    return this._isActive;
+  }
+  get isMobileAccessibility() {
+    return this._isMobileAccessibility;
+  }
+  createTouchHook() {
+    const hookDiv = document.createElement("button");
+    hookDiv.style.width = `${DIV_HOOK_SIZE}px`;
+    hookDiv.style.height = `${DIV_HOOK_SIZE}px`;
+    hookDiv.style.position = "absolute";
+    hookDiv.style.top = `${DIV_HOOK_POS_X}px`;
+    hookDiv.style.left = `${DIV_HOOK_POS_Y}px`;
+    hookDiv.style.zIndex = DIV_HOOK_ZINDEX.toString();
+    hookDiv.style.backgroundColor = "#FF0000";
+    hookDiv.title = "select to enable accessibility for this content";
+    hookDiv.addEventListener("focus", () => {
+      this._isMobileAccessibility = true;
+      this.activate();
+      this.destroyTouchHook();
+    });
+    document.body.appendChild(hookDiv);
+    this._hookDiv = hookDiv;
+  }
+  destroyTouchHook() {
+    if (!this._hookDiv) {
+      return;
+    }
+    document.body.removeChild(this._hookDiv);
+    this._hookDiv = null;
+  }
+  activate() {
+    if (this._isActive) {
+      return;
+    }
+    this._isActive = true;
+    globalThis.document.addEventListener("mousemove", this._onMouseMove, true);
+    globalThis.removeEventListener("keydown", this._onKeyDown, false);
+    this.renderer.on("postrender", this.update, this);
+    this.renderer.view.parentNode?.appendChild(this.div);
+  }
+  deactivate() {
+    if (!this._isActive || this._isMobileAccessibility) {
+      return;
+    }
+    this._isActive = false;
+    globalThis.document.removeEventListener("mousemove", this._onMouseMove, true);
+    globalThis.addEventListener("keydown", this._onKeyDown, false);
+    this.renderer.off("postrender", this.update);
+    this.div.parentNode?.removeChild(this.div);
+  }
+  updateAccessibleObjects(displayObject) {
+    if (!displayObject.visible || !displayObject.accessibleChildren) {
+      return;
+    }
+    if (displayObject.accessible && displayObject.isInteractive()) {
+      if (!displayObject._accessibleActive) {
+        this.addChild(displayObject);
+      }
+      displayObject.renderId = this.renderId;
+    }
+    const children = displayObject.children;
+    if (children) {
+      for (let i = 0; i < children.length; i++) {
+        this.updateAccessibleObjects(children[i]);
+      }
+    }
+  }
+  update() {
+    const now = performance.now();
+    if (isMobile.android.device && now < this.androidUpdateCount) {
+      return;
+    }
+    this.androidUpdateCount = now + this.androidUpdateFrequency;
+    if (!this.renderer.renderingToScreen) {
+      return;
+    }
+    if (this.renderer.lastObjectRendered) {
+      this.updateAccessibleObjects(this.renderer.lastObjectRendered);
+    }
+    const { x, y, width, height } = this.renderer.view.getBoundingClientRect();
+    const { width: viewWidth, height: viewHeight, resolution } = this.renderer;
+    const sx = width / viewWidth * resolution;
+    const sy = height / viewHeight * resolution;
+    let div = this.div;
+    div.style.left = `${x}px`;
+    div.style.top = `${y}px`;
+    div.style.width = `${viewWidth}px`;
+    div.style.height = `${viewHeight}px`;
+    for (let i = 0; i < this.children.length; i++) {
+      const child = this.children[i];
+      if (child.renderId !== this.renderId) {
+        child._accessibleActive = false;
+        removeItems(this.children, i, 1);
+        this.div.removeChild(child._accessibleDiv);
+        this.pool.push(child._accessibleDiv);
+        child._accessibleDiv = null;
+        i--;
+      } else {
+        div = child._accessibleDiv;
+        let hitArea = child.hitArea;
+        const wt = child.worldTransform;
+        if (child.hitArea) {
+          div.style.left = `${(wt.tx + hitArea.x * wt.a) * sx}px`;
+          div.style.top = `${(wt.ty + hitArea.y * wt.d) * sy}px`;
+          div.style.width = `${hitArea.width * wt.a * sx}px`;
+          div.style.height = `${hitArea.height * wt.d * sy}px`;
+        } else {
+          hitArea = child.getBounds();
+          this.capHitArea(hitArea);
+          div.style.left = `${hitArea.x * sx}px`;
+          div.style.top = `${hitArea.y * sy}px`;
+          div.style.width = `${hitArea.width * sx}px`;
+          div.style.height = `${hitArea.height * sy}px`;
+          if (div.title !== child.accessibleTitle && child.accessibleTitle !== null) {
+            div.title = child.accessibleTitle;
+          }
+          if (div.getAttribute("aria-label") !== child.accessibleHint && child.accessibleHint !== null) {
+            div.setAttribute("aria-label", child.accessibleHint);
+          }
+        }
+        if (child.accessibleTitle !== div.title || child.tabIndex !== div.tabIndex) {
+          div.title = child.accessibleTitle;
+          div.tabIndex = child.tabIndex;
+          if (this.debug)
+            this.updateDebugHTML(div);
+        }
+      }
+    }
+    this.renderId++;
+  }
+  updateDebugHTML(div) {
+    div.innerHTML = `type: ${div.type}</br> title : ${div.title}</br> tabIndex: ${div.tabIndex}`;
+  }
+  capHitArea(hitArea) {
+    if (hitArea.x < 0) {
+      hitArea.width += hitArea.x;
+      hitArea.x = 0;
+    }
+    if (hitArea.y < 0) {
+      hitArea.height += hitArea.y;
+      hitArea.y = 0;
+    }
+    const { width: viewWidth, height: viewHeight } = this.renderer;
+    if (hitArea.x + hitArea.width > viewWidth) {
+      hitArea.width = viewWidth - hitArea.x;
+    }
+    if (hitArea.y + hitArea.height > viewHeight) {
+      hitArea.height = viewHeight - hitArea.y;
+    }
+  }
+  addChild(displayObject) {
+    let div = this.pool.pop();
+    if (!div) {
+      div = document.createElement("button");
+      div.style.width = `${DIV_TOUCH_SIZE}px`;
+      div.style.height = `${DIV_TOUCH_SIZE}px`;
+      div.style.backgroundColor = this.debug ? "rgba(255,255,255,0.5)" : "transparent";
+      div.style.position = "absolute";
+      div.style.zIndex = DIV_TOUCH_ZINDEX.toString();
+      div.style.borderStyle = "none";
+      if (navigator.userAgent.toLowerCase().includes("chrome")) {
+        div.setAttribute("aria-live", "off");
+      } else {
+        div.setAttribute("aria-live", "polite");
+      }
+      if (navigator.userAgent.match(/rv:.*Gecko\//)) {
+        div.setAttribute("aria-relevant", "additions");
+      } else {
+        div.setAttribute("aria-relevant", "text");
+      }
+      div.addEventListener("click", this._onClick.bind(this));
+      div.addEventListener("focus", this._onFocus.bind(this));
+      div.addEventListener("focusout", this._onFocusOut.bind(this));
+    }
+    div.style.pointerEvents = displayObject.accessiblePointerEvents;
+    div.type = displayObject.accessibleType;
+    if (displayObject.accessibleTitle && displayObject.accessibleTitle !== null) {
+      div.title = displayObject.accessibleTitle;
+    } else if (!displayObject.accessibleHint || displayObject.accessibleHint === null) {
+      div.title = `displayObject ${displayObject.tabIndex}`;
+    }
+    if (displayObject.accessibleHint && displayObject.accessibleHint !== null) {
+      div.setAttribute("aria-label", displayObject.accessibleHint);
+    }
+    if (this.debug)
+      this.updateDebugHTML(div);
+    displayObject._accessibleActive = true;
+    displayObject._accessibleDiv = div;
+    div.displayObject = displayObject;
+    this.children.push(displayObject);
+    this.div.appendChild(displayObject._accessibleDiv);
+    displayObject._accessibleDiv.tabIndex = displayObject.tabIndex;
+  }
+  _dispatchEvent(e, type) {
+    const { displayObject: target } = e.target;
+    const boundry = this.renderer.events.rootBoundary;
+    const event = Object.assign(new FederatedEvent(boundry), { target });
+    boundry.rootTarget = this.renderer.lastObjectRendered;
+    type.forEach((type2) => boundry.dispatchEvent(event, type2));
+  }
+  _onClick(e) {
+    this._dispatchEvent(e, ["click", "pointertap", "tap"]);
+  }
+  _onFocus(e) {
+    if (!e.target.getAttribute("aria-live")) {
+      e.target.setAttribute("aria-live", "assertive");
+    }
+    this._dispatchEvent(e, ["mouseover"]);
+  }
+  _onFocusOut(e) {
+    if (!e.target.getAttribute("aria-live")) {
+      e.target.setAttribute("aria-live", "polite");
+    }
+    this._dispatchEvent(e, ["mouseout"]);
+  }
+  _onKeyDown(e) {
+    if (e.keyCode !== KEY_CODE_TAB) {
+      return;
+    }
+    this.activate();
+  }
+  _onMouseMove(e) {
+    if (e.movementX === 0 && e.movementY === 0) {
+      return;
+    }
+    this.deactivate();
+  }
+  destroy() {
+    this.destroyTouchHook();
+    this.div = null;
+    globalThis.document.removeEventListener("mousemove", this._onMouseMove, true);
+    globalThis.removeEventListener("keydown", this._onKeyDown);
+    this.pool = null;
+    this.children = null;
+    this.renderer = null;
+  }
+}
+AccessibilityManager.extension = {
+  name: "accessibility",
+  type: [
+    ExtensionType.RendererPlugin,
+    ExtensionType.CanvasRendererPlugin
+  ]
+};
+extensions$1.add(AccessibilityManager);
+
+const _Application = class {
+  constructor(options) {
+    this.stage = new Container();
+    options = Object.assign({
+      forceCanvas: false
+    }, options);
+    this.renderer = autoDetectRenderer(options);
+    _Application._plugins.forEach((plugin) => {
+      plugin.init.call(this, options);
+    });
+  }
+  render() {
+    this.renderer.render(this.stage);
+  }
+  get view() {
+    return this.renderer.view;
+  }
+  get screen() {
+    return this.renderer.screen;
+  }
+  destroy(removeView, stageOptions) {
+    const plugins = _Application._plugins.slice(0);
+    plugins.reverse();
+    plugins.forEach((plugin) => {
+      plugin.destroy.call(this);
+    });
+    this.stage.destroy(stageOptions);
+    this.stage = null;
+    this.renderer.destroy(removeView);
+    this.renderer = null;
+  }
+};
+let Application = _Application;
+Application._plugins = [];
+extensions$1.handleByList(ExtensionType.Application, Application._plugins);
+
+class ResizePlugin {
+  static init(options) {
+    Object.defineProperty(this, "resizeTo", {
+      set(dom) {
+        globalThis.removeEventListener("resize", this.queueResize);
+        this._resizeTo = dom;
+        if (dom) {
+          globalThis.addEventListener("resize", this.queueResize);
+          this.resize();
+        }
+      },
+      get() {
+        return this._resizeTo;
+      }
+    });
+    this.queueResize = () => {
+      if (!this._resizeTo) {
+        return;
+      }
+      this.cancelResize();
+      this._resizeId = requestAnimationFrame(() => this.resize());
+    };
+    this.cancelResize = () => {
+      if (this._resizeId) {
+        cancelAnimationFrame(this._resizeId);
+        this._resizeId = null;
+      }
+    };
+    this.resize = () => {
+      if (!this._resizeTo) {
+        return;
+      }
+      this.cancelResize();
+      let width;
+      let height;
+      if (this._resizeTo === globalThis.window) {
+        width = globalThis.innerWidth;
+        height = globalThis.innerHeight;
+      } else {
+        const { clientWidth, clientHeight } = this._resizeTo;
+        width = clientWidth;
+        height = clientHeight;
+      }
+      this.renderer.resize(width, height);
+      this.render();
+    };
+    this._resizeId = null;
+    this._resizeTo = null;
+    this.resizeTo = options.resizeTo || null;
+  }
+  static destroy() {
+    globalThis.removeEventListener("resize", this.queueResize);
+    this.cancelResize();
+    this.cancelResize = null;
+    this.queueResize = null;
+    this.resizeTo = null;
+    this.resize = null;
+  }
+}
+ResizePlugin.extension = ExtensionType.Application;
+extensions$1.add(ResizePlugin);
+
+const assetKeyMap = {
+  loader: ExtensionType.LoadParser,
+  resolver: ExtensionType.ResolveParser,
+  cache: ExtensionType.CacheParser,
+  detection: ExtensionType.DetectionParser
+};
+extensions$1.handle(ExtensionType.Asset, (extension) => {
+  const ref = extension.ref;
+  Object.entries(assetKeyMap).filter(([key]) => !!ref[key]).forEach(([key, type]) => extensions$1.add(Object.assign(ref[key], { extension: ref[key].extension ?? type })));
+}, (extension) => {
+  const ref = extension.ref;
+  Object.keys(assetKeyMap).filter((key) => !!ref[key]).forEach((key) => extensions$1.remove(ref[key]));
+});
+
+class BackgroundLoader {
+  constructor(loader, verbose = false) {
+    this._loader = loader;
+    this._assetList = [];
+    this._isLoading = false;
+    this._maxConcurrent = 1;
+    this.verbose = verbose;
+  }
+  add(assetUrls) {
+    assetUrls.forEach((a) => {
+      this._assetList.push(a);
+    });
+    if (this.verbose)
+      console.log("[BackgroundLoader] assets: ", this._assetList);
+    if (this._isActive && !this._isLoading) {
+      this._next();
+    }
+  }
+  async _next() {
+    if (this._assetList.length && this._isActive) {
+      this._isLoading = true;
+      const toLoad = [];
+      const toLoadAmount = Math.min(this._assetList.length, this._maxConcurrent);
+      for (let i = 0; i < toLoadAmount; i++) {
+        toLoad.push(this._assetList.pop());
+      }
+      await this._loader.load(toLoad);
+      this._isLoading = false;
+      this._next();
+    }
+  }
+  get active() {
+    return this._isActive;
+  }
+  set active(value) {
+    if (this._isActive === value)
+      return;
+    this._isActive = value;
+    if (value && !this._isLoading) {
+      this._next();
+    }
+  }
+}
+
+function checkDataUrl(url, mimes) {
+  if (Array.isArray(mimes)) {
+    for (const mime of mimes) {
+      if (url.startsWith(`data:${mime}`))
+        return true;
+    }
+    return false;
+  }
+  return url.startsWith(`data:${mimes}`);
+}
+
+function checkExtension(url, extension) {
+  const tempURL = url.split("?")[0];
+  const ext = path.extname(tempURL).toLowerCase();
+  if (Array.isArray(extension)) {
+    return extension.includes(ext);
+  }
+  return ext === extension;
+}
+
+const convertToList = (input, transform) => {
+  if (!Array.isArray(input)) {
+    input = [input];
+  }
+  if (!transform) {
+    return input;
+  }
+  return input.map((item) => {
+    if (typeof item === "string") {
+      return transform(item);
+    }
+    return item;
+  });
+};
+
+const copySearchParams = (targetUrl, sourceUrl) => {
+  const searchParams = sourceUrl.split("?")[1];
+  if (searchParams) {
+    targetUrl += `?${searchParams}`;
+  }
+  return targetUrl;
+};
+
+function processX(base, ids, depth, result, tags) {
+  const id = ids[depth];
+  for (let i = 0; i < id.length; i++) {
+    const value = id[i];
+    if (depth < ids.length - 1) {
+      processX(base.replace(result[depth], value), ids, depth + 1, result, tags);
+    } else {
+      tags.push(base.replace(result[depth], value));
+    }
+  }
+}
+function createStringVariations(string) {
+  const regex = /\{(.*?)\}/g;
+  const result = string.match(regex);
+  const tags = [];
+  if (result) {
+    const ids = [];
+    result.forEach((vars) => {
+      const split = vars.substring(1, vars.length - 1).split(",");
+      ids.push(split);
+    });
+    processX(string, ids, 0, result, tags);
+  } else {
+    tags.push(string);
+  }
+  return tags;
+}
+
+const isSingleItem = (item) => !Array.isArray(item);
+
+class CacheClass {
+  constructor() {
+    this._parsers = [];
+    this._cache = /* @__PURE__ */ new Map();
+    this._cacheMap = /* @__PURE__ */ new Map();
+  }
+  reset() {
+    this._cacheMap.clear();
+    this._cache.clear();
+  }
+  has(key) {
+    return this._cache.has(key);
+  }
+  get(key) {
+    const result = this._cache.get(key);
+    if (!result) {
+      console.warn(`[Assets] Asset id ${key} was not found in the Cache`);
+    }
+    return result;
+  }
+  set(key, value) {
+    const keys = convertToList(key);
+    let cacheableAssets;
+    for (let i = 0; i < this.parsers.length; i++) {
+      const parser = this.parsers[i];
+      if (parser.test(value)) {
+        cacheableAssets = parser.getCacheableAssets(keys, value);
+        break;
+      }
+    }
+    if (!cacheableAssets) {
+      cacheableAssets = {};
+      keys.forEach((key2) => {
+        cacheableAssets[key2] = value;
+      });
+    }
+    const cacheKeys = Object.keys(cacheableAssets);
+    const cachedAssets = {
+      cacheKeys,
+      keys
+    };
+    keys.forEach((key2) => {
+      this._cacheMap.set(key2, cachedAssets);
+    });
+    cacheKeys.forEach((key2) => {
+      if (this._cache.has(key2) && this._cache.get(key2) !== value) {
+        console.warn("[Cache] already has key:", key2);
+      }
+      this._cache.set(key2, cacheableAssets[key2]);
+    });
+    if (value instanceof Texture) {
+      const texture = value;
+      keys.forEach((key2) => {
+        if (texture.baseTexture !== Texture.EMPTY.baseTexture) {
+          BaseTexture.addToCache(texture.baseTexture, key2);
+        }
+        Texture.addToCache(texture, key2);
+      });
+    }
+  }
+  remove(key) {
+    this._cacheMap.get(key);
+    if (!this._cacheMap.has(key)) {
+      console.warn(`[Assets] Asset id ${key} was not found in the Cache`);
+      return;
+    }
+    const cacheMap = this._cacheMap.get(key);
+    const cacheKeys = cacheMap.cacheKeys;
+    cacheKeys.forEach((key2) => {
+      this._cache.delete(key2);
+    });
+    cacheMap.keys.forEach((key2) => {
+      this._cacheMap.delete(key2);
+    });
+  }
+  get parsers() {
+    return this._parsers;
+  }
+}
+const Cache = new CacheClass();
+
+class Loader {
+  constructor() {
+    this._parsers = [];
+    this._parsersValidated = false;
+    this.parsers = new Proxy(this._parsers, {
+      set: (target, key, value) => {
+        this._parsersValidated = false;
+        target[key] = value;
+        return true;
+      }
+    });
+    this.promiseCache = {};
+  }
+  reset() {
+    this._parsersValidated = false;
+    this.promiseCache = {};
+  }
+  _getLoadPromiseAndParser(url, data) {
+    const result = {
+      promise: null,
+      parser: null
+    };
+    result.promise = (async () => {
+      let asset = null;
+      let parser = null;
+      if (data.loadParser) {
+        parser = this._parserHash[data.loadParser];
+        if (!parser) {
+          console.warn(`[Assets] specified load parser "${data.loadParser}" not found while loading ${url}`);
+        }
+      }
+      if (!parser) {
+        for (let i = 0; i < this.parsers.length; i++) {
+          const parserX = this.parsers[i];
+          if (parserX.load && parserX.test?.(url, data, this)) {
+            parser = parserX;
+            break;
+          }
+        }
+        if (!parser) {
+          console.warn(`[Assets] ${url} could not be loaded as we don't know how to parse it, ensure the correct parser has been added`);
+          return null;
+        }
+      }
+      asset = await parser.load(url, data, this);
+      result.parser = parser;
+      for (let i = 0; i < this.parsers.length; i++) {
+        const parser2 = this.parsers[i];
+        if (parser2.parse) {
+          if (parser2.parse && await parser2.testParse?.(asset, data, this)) {
+            asset = await parser2.parse(asset, data, this) || asset;
+            result.parser = parser2;
+          }
+        }
+      }
+      return asset;
+    })();
+    return result;
+  }
+  async load(assetsToLoadIn, onProgress) {
+    if (!this._parsersValidated) {
+      this._validateParsers();
+    }
+    let count = 0;
+    const assets = {};
+    const singleAsset = isSingleItem(assetsToLoadIn);
+    const assetsToLoad = convertToList(assetsToLoadIn, (item) => ({
+      src: item
+    }));
+    const total = assetsToLoad.length;
+    const promises = assetsToLoad.map(async (asset) => {
+      const url = path.toAbsolute(asset.src);
+      if (!assets[asset.src]) {
+        try {
+          if (!this.promiseCache[url]) {
+            this.promiseCache[url] = this._getLoadPromiseAndParser(url, asset);
+          }
+          assets[asset.src] = await this.promiseCache[url].promise;
+          if (onProgress)
+            onProgress(++count / total);
+        } catch (e) {
+          delete this.promiseCache[url];
+          delete assets[asset.src];
+          throw new Error(`[Loader.load] Failed to load ${url}.
+${e}`);
+        }
+      }
+    });
+    await Promise.all(promises);
+    return singleAsset ? assets[assetsToLoad[0].src] : assets;
+  }
+  async unload(assetsToUnloadIn) {
+    const assetsToUnload = convertToList(assetsToUnloadIn, (item) => ({
+      src: item
+    }));
+    const promises = assetsToUnload.map(async (asset) => {
+      const url = path.toAbsolute(asset.src);
+      const loadPromise = this.promiseCache[url];
+      if (loadPromise) {
+        const loadedAsset = await loadPromise.promise;
+        loadPromise.parser?.unload?.(loadedAsset, asset, this);
+        delete this.promiseCache[url];
+      }
+    });
+    await Promise.all(promises);
+  }
+  _validateParsers() {
+    this._parsersValidated = true;
+    this._parserHash = this._parsers.filter((parser) => parser.name).reduce((hash, parser) => {
+      if (hash[parser.name]) {
+        console.warn(`[Assets] loadParser name conflict "${parser.name}"`);
+      }
+      return { ...hash, [parser.name]: parser };
+    }, {});
+  }
+}
+
+var LoaderParserPriority = /* @__PURE__ */ ((LoaderParserPriority2) => {
+  LoaderParserPriority2[LoaderParserPriority2["Low"] = 0] = "Low";
+  LoaderParserPriority2[LoaderParserPriority2["Normal"] = 1] = "Normal";
+  LoaderParserPriority2[LoaderParserPriority2["High"] = 2] = "High";
+  return LoaderParserPriority2;
+})(LoaderParserPriority || {});
+
+const validJSONExtension = ".json";
+const validJSONMIME = "application/json";
+const loadJson = {
+  extension: {
+    type: ExtensionType.LoadParser,
+    priority: LoaderParserPriority.Low
+  },
+  name: "loadJson",
+  test(url) {
+    return checkDataUrl(url, validJSONMIME) || checkExtension(url, validJSONExtension);
+  },
+  async load(url) {
+    const response = await settings.ADAPTER.fetch(url);
+    const json = await response.json();
+    return json;
+  }
+};
+extensions$1.add(loadJson);
+
+const validTXTExtension = ".txt";
+const validTXTMIME = "text/plain";
+const loadTxt = {
+  name: "loadTxt",
+  extension: {
+    type: ExtensionType.LoadParser,
+    priority: LoaderParserPriority.Low
+  },
+  test(url) {
+    return checkDataUrl(url, validTXTMIME) || checkExtension(url, validTXTExtension);
+  },
+  async load(url) {
+    const response = await settings.ADAPTER.fetch(url);
+    const txt = await response.text();
+    return txt;
+  }
+};
+extensions$1.add(loadTxt);
+
+const validWeights = [
+  "normal",
+  "bold",
+  "100",
+  "200",
+  "300",
+  "400",
+  "500",
+  "600",
+  "700",
+  "800",
+  "900"
+];
+const validFontExtensions = [".ttf", ".otf", ".woff", ".woff2"];
+const validFontMIMEs = [
+  "font/ttf",
+  "font/otf",
+  "font/woff",
+  "font/woff2"
+];
+const CSS_IDENT_TOKEN_REGEX = /^(--|-?[A-Z_])[0-9A-Z_-]*$/i;
+function getFontFamilyName(url) {
+  const ext = path.extname(url);
+  const name = path.basename(url, ext);
+  const nameWithSpaces = name.replace(/(-|_)/g, " ");
+  const nameTokens = nameWithSpaces.toLowerCase().split(" ").map((word) => word.charAt(0).toUpperCase() + word.slice(1));
+  let valid = nameTokens.length > 0;
+  for (const token of nameTokens) {
+    if (!token.match(CSS_IDENT_TOKEN_REGEX)) {
+      valid = false;
+      break;
+    }
+  }
+  let fontFamilyName = nameTokens.join(" ");
+  if (!valid) {
+    fontFamilyName = `"${fontFamilyName.replace(/[\\"]/g, "\\$&")}"`;
+  }
+  return fontFamilyName;
+}
+const loadWebFont = {
+  extension: {
+    type: ExtensionType.LoadParser,
+    priority: LoaderParserPriority.Low
+  },
+  name: "loadWebFont",
+  test(url) {
+    return checkDataUrl(url, validFontMIMEs) || checkExtension(url, validFontExtensions);
+  },
+  async load(url, options) {
+    const fonts = settings.ADAPTER.getFontFaceSet();
+    if (fonts) {
+      const fontFaces = [];
+      const name = options.data?.family ?? getFontFamilyName(url);
+      const weights = options.data?.weights?.filter((weight) => validWeights.includes(weight)) ?? ["normal"];
+      const data = options.data ?? {};
+      for (let i = 0; i < weights.length; i++) {
+        const weight = weights[i];
+        const font = new FontFace(name, `url(${encodeURI(url)})`, {
+          ...data,
+          weight
+        });
+        await font.load();
+        fonts.add(font);
+        fontFaces.push(font);
+      }
+      return fontFaces.length === 1 ? fontFaces[0] : fontFaces;
+    }
+    console.warn("[loadWebFont] FontFace API is not supported. Skipping loading font");
+    return null;
+  },
+  unload(font) {
+    (Array.isArray(font) ? font : [font]).forEach((t) => settings.ADAPTER.getFontFaceSet().delete(t));
+  }
+};
+extensions$1.add(loadWebFont);
+
+let UUID = 0;
+let MAX_WORKERS;
+const WHITE_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+const checkImageBitmapCode = {
+  id: "checkImageBitmap",
+  code: `
+    async function checkImageBitmap()
+    {
+        try
+        {
+            if (typeof createImageBitmap !== 'function') return false;
+
+            const response = await fetch('${WHITE_PNG}');
+            const imageBlob =  await response.blob();
+            const imageBitmap = await createImageBitmap(imageBlob);
+
+            return imageBitmap.width === 1 && imageBitmap.height === 1;
+        }
+        catch (e)
+        {
+            return false;
+        }
+    }
+    checkImageBitmap().then((result) => { self.postMessage(result); });
+    `
+};
+const workerCode = {
+  id: "loadImageBitmap",
+  code: `
+    async function loadImageBitmap(url)
+    {
+        const response = await fetch(url);
+
+        if (!response.ok)
+        {
+            throw new Error(\`[WorkerManager.loadImageBitmap] Failed to fetch \${url}: \`
+                + \`\${response.status} \${response.statusText}\`);
+        }
+
+        const imageBlob =  await response.blob();
+        const imageBitmap = await createImageBitmap(imageBlob);
+
+        return imageBitmap;
+    }
+    self.onmessage = async (event) =>
+    {
+        try
+        {
+            const imageBitmap = await loadImageBitmap(event.data.data[0]);
+
+            self.postMessage({
+                data: imageBitmap,
+                uuid: event.data.uuid,
+                id: event.data.id,
+            }, [imageBitmap]);
+        }
+        catch(e)
+        {
+            self.postMessage({
+                error: e,
+                uuid: event.data.uuid,
+                id: event.data.id,
+            });
+        }
+    };`
+};
+let workerURL;
+class WorkerManagerClass {
+  constructor() {
+    this._initialized = false;
+    this._createdWorkers = 0;
+    this.workerPool = [];
+    this.queue = [];
+    this.resolveHash = {};
+  }
+  isImageBitmapSupported() {
+    if (this._isImageBitmapSupported !== void 0)
+      return this._isImageBitmapSupported;
+    this._isImageBitmapSupported = new Promise((resolve) => {
+      const workerURL2 = URL.createObjectURL(new Blob([checkImageBitmapCode.code], { type: "application/javascript" }));
+      const worker = new Worker(workerURL2);
+      worker.addEventListener("message", (event) => {
+        worker.terminate();
+        URL.revokeObjectURL(workerURL2);
+        resolve(event.data);
+      });
+    });
+    return this._isImageBitmapSupported;
+  }
+  loadImageBitmap(src) {
+    return this._run("loadImageBitmap", [src]);
+  }
+  async _initWorkers() {
+    if (this._initialized)
+      return;
+    this._initialized = true;
+  }
+  getWorker() {
+    if (MAX_WORKERS === void 0) {
+      MAX_WORKERS = navigator.hardwareConcurrency || 4;
+    }
+    let worker = this.workerPool.pop();
+    if (!worker && this._createdWorkers < MAX_WORKERS) {
+      if (!workerURL) {
+        workerURL = URL.createObjectURL(new Blob([workerCode.code], { type: "application/javascript" }));
+      }
+      this._createdWorkers++;
+      worker = new Worker(workerURL);
+      worker.addEventListener("message", (event) => {
+        this.complete(event.data);
+        this.returnWorker(event.target);
+        this.next();
+      });
+    }
+    return worker;
+  }
+  returnWorker(worker) {
+    this.workerPool.push(worker);
+  }
+  complete(data) {
+    if (data.error !== void 0) {
+      this.resolveHash[data.uuid].reject(data.error);
+    } else {
+      this.resolveHash[data.uuid].resolve(data.data);
+    }
+    this.resolveHash[data.uuid] = null;
+  }
+  async _run(id, args) {
+    await this._initWorkers();
+    const promise = new Promise((resolve, reject) => {
+      this.queue.push({ id, arguments: args, resolve, reject });
+    });
+    this.next();
+    return promise;
+  }
+  next() {
+    if (!this.queue.length)
+      return;
+    const worker = this.getWorker();
+    if (!worker) {
+      return;
+    }
+    const toDo = this.queue.pop();
+    const id = toDo.id;
+    this.resolveHash[UUID] = { resolve: toDo.resolve, reject: toDo.reject };
+    worker.postMessage({
+      data: toDo.arguments,
+      uuid: UUID++,
+      id
+    });
+  }
+}
+const WorkerManager = new WorkerManagerClass();
+
+function createTexture(base, loader, url) {
+  const texture = new Texture(base);
+  texture.baseTexture.on("dispose", () => {
+    delete loader.promiseCache[url];
+  });
+  return texture;
+}
+
+const validImageExtensions = [".jpeg", ".jpg", ".png", ".webp", ".avif"];
+const validImageMIMEs = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/avif"
+];
+async function loadImageBitmap(url) {
+  const response = await settings.ADAPTER.fetch(url);
+  if (!response.ok) {
+    throw new Error(`[loadImageBitmap] Failed to fetch ${url}: ${response.status} ${response.statusText}`);
+  }
+  const imageBlob = await response.blob();
+  const imageBitmap = await createImageBitmap(imageBlob);
+  return imageBitmap;
+}
+const loadTextures = {
+  name: "loadTextures",
+  extension: {
+    type: ExtensionType.LoadParser,
+    priority: LoaderParserPriority.High
+  },
+  config: {
+    preferWorkers: true,
+    preferCreateImageBitmap: true,
+    crossOrigin: "anonymous"
+  },
+  test(url) {
+    return checkDataUrl(url, validImageMIMEs) || checkExtension(url, validImageExtensions);
+  },
+  async load(url, asset, loader) {
+    let src = null;
+    if (globalThis.createImageBitmap && this.config.preferCreateImageBitmap) {
+      if (this.config.preferWorkers && await WorkerManager.isImageBitmapSupported()) {
+        src = await WorkerManager.loadImageBitmap(url);
+      } else {
+        src = await loadImageBitmap(url);
+      }
+    } else {
+      src = await new Promise((resolve) => {
+        src = new Image();
+        src.crossOrigin = this.config.crossOrigin;
+        src.src = url;
+        if (src.complete) {
+          resolve(src);
+        } else {
+          src.onload = () => {
+            resolve(src);
+          };
+        }
+      });
+    }
+    const base = new BaseTexture(src, {
+      resolution: getResolutionOfUrl(url),
+      ...asset.data
+    });
+    base.resource.src = url;
+    return createTexture(base, loader, url);
+  },
+  unload(texture) {
+    texture.destroy(true);
+  }
+};
+extensions$1.add(loadTextures);
+
+const validSVGExtension = ".svg";
+const validSVGMIME = "image/svg+xml";
+const loadSVG = {
+  extension: {
+    type: ExtensionType.LoadParser,
+    priority: LoaderParserPriority.High
+  },
+  name: "loadSVG",
+  test(url) {
+    return checkDataUrl(url, validSVGMIME) || checkExtension(url, validSVGExtension);
+  },
+  async testParse(data) {
+    return SVGResource.test(data);
+  },
+  async parse(asset, data, loader) {
+    const src = new SVGResource(asset, data?.data?.resourceOptions);
+    await src.load();
+    const base = new BaseTexture(src, {
+      resolution: getResolutionOfUrl(asset),
+      ...data?.data
+    });
+    base.resource.src = asset;
+    const texture = createTexture(base, loader, asset);
+    return texture;
+  },
+  async load(url, _options) {
+    const response = await settings.ADAPTER.fetch(url);
+    return response.text();
+  },
+  unload: loadTextures.unload
+};
+extensions$1.add(loadSVG);
+
+class Resolver {
+  constructor() {
+    this._defaultBundleIdentifierOptions = {
+      connector: "-",
+      createBundleAssetId: (bundleId, assetId) => `${bundleId}${this._bundleIdConnector}${assetId}`,
+      extractAssetIdFromBundle: (bundleId, assetBundleId) => assetBundleId.replace(`${bundleId}${this._bundleIdConnector}`, "")
+    };
+    this._bundleIdConnector = this._defaultBundleIdentifierOptions.connector;
+    this._createBundleAssetId = this._defaultBundleIdentifierOptions.createBundleAssetId;
+    this._extractAssetIdFromBundle = this._defaultBundleIdentifierOptions.extractAssetIdFromBundle;
+    this._assetMap = {};
+    this._preferredOrder = [];
+    this._parsers = [];
+    this._resolverHash = {};
+    this._bundles = {};
+  }
+  setBundleIdentifier(bundleIdentifier) {
+    this._bundleIdConnector = bundleIdentifier.connector ?? this._bundleIdConnector;
+    this._createBundleAssetId = bundleIdentifier.createBundleAssetId ?? this._createBundleAssetId;
+    this._extractAssetIdFromBundle = bundleIdentifier.extractAssetIdFromBundle ?? this._extractAssetIdFromBundle;
+    if (this._extractAssetIdFromBundle("foo", this._createBundleAssetId("foo", "bar")) !== "bar") {
+      throw new Error("[Resolver] GenerateBundleAssetId are not working correctly");
+    }
+  }
+  prefer(...preferOrders) {
+    preferOrders.forEach((prefer) => {
+      this._preferredOrder.push(prefer);
+      if (!prefer.priority) {
+        prefer.priority = Object.keys(prefer.params);
+      }
+    });
+    this._resolverHash = {};
+  }
+  set basePath(basePath) {
+    this._basePath = basePath;
+  }
+  get basePath() {
+    return this._basePath;
+  }
+  set rootPath(rootPath) {
+    this._rootPath = rootPath;
+  }
+  get rootPath() {
+    return this._rootPath;
+  }
+  get parsers() {
+    return this._parsers;
+  }
+  reset() {
+    this.setBundleIdentifier(this._defaultBundleIdentifierOptions);
+    this._assetMap = {};
+    this._preferredOrder = [];
+    this._resolverHash = {};
+    this._rootPath = null;
+    this._basePath = null;
+    this._manifest = null;
+    this._bundles = {};
+    this._defaultSearchParams = null;
+  }
+  setDefaultSearchParams(searchParams) {
+    if (typeof searchParams === "string") {
+      this._defaultSearchParams = searchParams;
+    } else {
+      const queryValues = searchParams;
+      this._defaultSearchParams = Object.keys(queryValues).map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(queryValues[key])}`).join("&");
+    }
+  }
+  addManifest(manifest) {
+    if (this._manifest) {
+      console.warn("[Resolver] Manifest already exists, this will be overwritten");
+    }
+    this._manifest = manifest;
+    manifest.bundles.forEach((bundle) => {
+      this.addBundle(bundle.name, bundle.assets);
+    });
+  }
+  addBundle(bundleId, assets) {
+    const assetNames = [];
+    if (Array.isArray(assets)) {
+      assets.forEach((asset) => {
+        if (typeof asset.name === "string") {
+          const bundleAssetId = this._createBundleAssetId(bundleId, asset.name);
+          assetNames.push(bundleAssetId);
+          this.add([asset.name, bundleAssetId], asset.srcs, asset.data);
+        } else {
+          const bundleIds = asset.name.map((name) => this._createBundleAssetId(bundleId, name));
+          bundleIds.forEach((bundleId2) => {
+            assetNames.push(bundleId2);
+          });
+          this.add([...asset.name, ...bundleIds], asset.srcs);
+        }
+      });
+    } else {
+      Object.keys(assets).forEach((key) => {
+        assetNames.push(this._createBundleAssetId(bundleId, key));
+        this.add([key, this._createBundleAssetId(bundleId, key)], assets[key]);
+      });
+    }
+    this._bundles[bundleId] = assetNames;
+  }
+  add(keysIn, assetsIn, data) {
+    const keys = convertToList(keysIn);
+    keys.forEach((key) => {
+      if (this.hasKey(key)) {
+        console.warn(`[Resolver] already has key: ${key} overwriting`);
+      }
+    });
+    if (!Array.isArray(assetsIn)) {
+      if (typeof assetsIn === "string") {
+        assetsIn = createStringVariations(assetsIn);
+      } else {
+        assetsIn = [assetsIn];
+      }
+    }
+    const assetMap = assetsIn.map((asset) => {
+      let formattedAsset = asset;
+      if (typeof asset === "string") {
+        let parsed = false;
+        for (let i = 0; i < this._parsers.length; i++) {
+          const parser = this._parsers[i];
+          if (parser.test(asset)) {
+            formattedAsset = parser.parse(asset);
+            parsed = true;
+            break;
+          }
+        }
+        if (!parsed) {
+          formattedAsset = {
+            src: asset
+          };
+        }
+      }
+      if (!formattedAsset.format) {
+        formattedAsset.format = formattedAsset.src.split(".").pop();
+      }
+      if (!formattedAsset.alias) {
+        formattedAsset.alias = keys;
+      }
+      if (this._basePath || this._rootPath) {
+        formattedAsset.src = path.toAbsolute(formattedAsset.src, this._basePath, this._rootPath);
+      }
+      formattedAsset.src = this._appendDefaultSearchParams(formattedAsset.src);
+      formattedAsset.data = formattedAsset.data ?? data;
+      return formattedAsset;
+    });
+    keys.forEach((key) => {
+      this._assetMap[key] = assetMap;
+    });
+  }
+  resolveBundle(bundleIds) {
+    const singleAsset = isSingleItem(bundleIds);
+    bundleIds = convertToList(bundleIds);
+    const out = {};
+    bundleIds.forEach((bundleId) => {
+      const assetNames = this._bundles[bundleId];
+      if (assetNames) {
+        const results = this.resolve(assetNames);
+        const assets = {};
+        for (const key in results) {
+          const asset = results[key];
+          assets[this._extractAssetIdFromBundle(bundleId, key)] = asset;
+        }
+        out[bundleId] = assets;
+      }
+    });
+    return singleAsset ? out[bundleIds[0]] : out;
+  }
+  resolveUrl(key) {
+    const result = this.resolve(key);
+    if (typeof key !== "string") {
+      const out = {};
+      for (const i in result) {
+        out[i] = result[i].src;
+      }
+      return out;
+    }
+    return result.src;
+  }
+  resolve(keys) {
+    const singleAsset = isSingleItem(keys);
+    keys = convertToList(keys);
+    const result = {};
+    keys.forEach((key) => {
+      if (!this._resolverHash[key]) {
+        if (this._assetMap[key]) {
+          let assets = this._assetMap[key];
+          const preferredOrder = this._getPreferredOrder(assets);
+          const bestAsset = assets[0];
+          preferredOrder?.priority.forEach((priorityKey) => {
+            preferredOrder.params[priorityKey].forEach((value) => {
+              const filteredAssets = assets.filter((asset) => {
+                if (asset[priorityKey]) {
+                  return asset[priorityKey] === value;
+                }
+                return false;
+              });
+              if (filteredAssets.length) {
+                assets = filteredAssets;
+              }
+            });
+          });
+          this._resolverHash[key] = assets[0] ?? bestAsset;
+        } else {
+          let src = key;
+          if (this._basePath || this._rootPath) {
+            src = path.toAbsolute(src, this._basePath, this._rootPath);
+          }
+          src = this._appendDefaultSearchParams(src);
+          this._resolverHash[key] = {
+            src
+          };
+        }
+      }
+      result[key] = this._resolverHash[key];
+    });
+    return singleAsset ? result[keys[0]] : result;
+  }
+  hasKey(key) {
+    return !!this._assetMap[key];
+  }
+  hasBundle(key) {
+    return !!this._bundles[key];
+  }
+  _getPreferredOrder(assets) {
+    for (let i = 0; i < assets.length; i++) {
+      const asset = assets[0];
+      const preferred = this._preferredOrder.find((preference) => preference.params.format.includes(asset.format));
+      if (preferred) {
+        return preferred;
+      }
+    }
+    return this._preferredOrder[0];
+  }
+  _appendDefaultSearchParams(url) {
+    if (!this._defaultSearchParams)
+      return url;
+    const paramConnector = /\?/.test(url) ? "&" : "?";
+    return `${url}${paramConnector}${this._defaultSearchParams}`;
+  }
+}
+
+class AssetsClass {
+  constructor() {
+    this._detections = [];
+    this._initialized = false;
+    this.resolver = new Resolver();
+    this.loader = new Loader();
+    this.cache = Cache;
+    this._backgroundLoader = new BackgroundLoader(this.loader);
+    this._backgroundLoader.active = true;
+    this.reset();
+  }
+  async init(options = {}) {
+    if (this._initialized) {
+      console.warn("[Assets]AssetManager already initialized, did you load before calling this Asset.init()?");
+      return;
+    }
+    this._initialized = true;
+    if (options.defaultSearchParams) {
+      this.resolver.setDefaultSearchParams(options.defaultSearchParams);
+    }
+    if (options.basePath) {
+      this.resolver.basePath = options.basePath;
+    }
+    if (options.bundleIdentifier) {
+      this.resolver.setBundleIdentifier(options.bundleIdentifier);
+    }
+    if (options.manifest) {
+      let manifest = options.manifest;
+      if (typeof manifest === "string") {
+        manifest = await this.load(manifest);
+      }
+      this.resolver.addManifest(manifest);
+    }
+    const resolutionPref = options.texturePreference?.resolution ?? 1;
+    const resolution = typeof resolutionPref === "number" ? [resolutionPref] : resolutionPref;
+    let formats = [];
+    if (options.texturePreference?.format) {
+      const formatPref = options.texturePreference?.format;
+      formats = typeof formatPref === "string" ? [formatPref] : formatPref;
+      for (const detection of this._detections) {
+        if (!await detection.test()) {
+          formats = await detection.remove(formats);
+        }
+      }
+    } else {
+      for (const detection of this._detections) {
+        if (await detection.test()) {
+          formats = await detection.add(formats);
+        }
+      }
+    }
+    this.resolver.prefer({
+      params: {
+        format: formats,
+        resolution
+      }
+    });
+    if (options.preferences) {
+      this.setPreferences(options.preferences);
+    }
+  }
+  add(keysIn, assetsIn, data) {
+    this.resolver.add(keysIn, assetsIn, data);
+  }
+  async load(urls, onProgress) {
+    if (!this._initialized) {
+      await this.init();
+    }
+    const singleAsset = isSingleItem(urls);
+    const urlArray = convertToList(urls).map((url) => {
+      if (typeof url !== "string") {
+        this.resolver.add(url.src, url);
+        return url.src;
+      }
+      if (!this.resolver.hasKey(url)) {
+        this.resolver.add(url, url);
+      }
+      return url;
+    });
+    const resolveResults = this.resolver.resolve(urlArray);
+    const out = await this._mapLoadToResolve(resolveResults, onProgress);
+    return singleAsset ? out[urlArray[0]] : out;
+  }
+  addBundle(bundleId, assets) {
+    this.resolver.addBundle(bundleId, assets);
+  }
+  async loadBundle(bundleIds, onProgress) {
+    if (!this._initialized) {
+      await this.init();
+    }
+    let singleAsset = false;
+    if (typeof bundleIds === "string") {
+      singleAsset = true;
+      bundleIds = [bundleIds];
+    }
+    const resolveResults = this.resolver.resolveBundle(bundleIds);
+    const out = {};
+    const keys = Object.keys(resolveResults);
+    let count = 0;
+    let total = 0;
+    const _onProgress = () => {
+      onProgress?.(++count / total);
+    };
+    const promises = keys.map((bundleId) => {
+      const resolveResult = resolveResults[bundleId];
+      total += Object.keys(resolveResult).length;
+      return this._mapLoadToResolve(resolveResult, _onProgress).then((resolveResult2) => {
+        out[bundleId] = resolveResult2;
+      });
+    });
+    await Promise.all(promises);
+    return singleAsset ? out[bundleIds[0]] : out;
+  }
+  async backgroundLoad(urls) {
+    if (!this._initialized) {
+      await this.init();
+    }
+    if (typeof urls === "string") {
+      urls = [urls];
+    }
+    const resolveResults = this.resolver.resolve(urls);
+    this._backgroundLoader.add(Object.values(resolveResults));
+  }
+  async backgroundLoadBundle(bundleIds) {
+    if (!this._initialized) {
+      await this.init();
+    }
+    if (typeof bundleIds === "string") {
+      bundleIds = [bundleIds];
+    }
+    const resolveResults = this.resolver.resolveBundle(bundleIds);
+    Object.values(resolveResults).forEach((resolveResult) => {
+      this._backgroundLoader.add(Object.values(resolveResult));
+    });
+  }
+  reset() {
+    this.resolver.reset();
+    this.loader.reset();
+    this.cache.reset();
+    this._initialized = false;
+  }
+  get(keys) {
+    if (typeof keys === "string") {
+      return Cache.get(keys);
+    }
+    const assets = {};
+    for (let i = 0; i < keys.length; i++) {
+      assets[i] = Cache.get(keys[i]);
+    }
+    return assets;
+  }
+  async _mapLoadToResolve(resolveResults, onProgress) {
+    const resolveArray = Object.values(resolveResults);
+    const resolveKeys = Object.keys(resolveResults);
+    this._backgroundLoader.active = false;
+    const loadedAssets = await this.loader.load(resolveArray, onProgress);
+    this._backgroundLoader.active = true;
+    const out = {};
+    resolveArray.forEach((resolveResult, i) => {
+      const asset = loadedAssets[resolveResult.src];
+      const keys = [resolveResult.src];
+      if (resolveResult.alias) {
+        keys.push(...resolveResult.alias);
+      }
+      out[resolveKeys[i]] = asset;
+      Cache.set(keys, asset);
+    });
+    return out;
+  }
+  async unload(urls) {
+    if (!this._initialized) {
+      await this.init();
+    }
+    const urlArray = convertToList(urls).map((url) => typeof url !== "string" ? url.src : url);
+    const resolveResults = this.resolver.resolve(urlArray);
+    await this._unloadFromResolved(resolveResults);
+  }
+  async unloadBundle(bundleIds) {
+    if (!this._initialized) {
+      await this.init();
+    }
+    bundleIds = convertToList(bundleIds);
+    const resolveResults = this.resolver.resolveBundle(bundleIds);
+    const promises = Object.keys(resolveResults).map((bundleId) => this._unloadFromResolved(resolveResults[bundleId]));
+    await Promise.all(promises);
+  }
+  async _unloadFromResolved(resolveResult) {
+    const resolveArray = Object.values(resolveResult);
+    resolveArray.forEach((resolveResult2) => {
+      Cache.remove(resolveResult2.src);
+    });
+    await this.loader.unload(resolveArray);
+  }
+  get detections() {
+    return this._detections;
+  }
+  get preferWorkers() {
+    return loadTextures.config.preferWorkers;
+  }
+  set preferWorkers(value) {
+    deprecation("7.2.0", "Assets.prefersWorkers is deprecated, use Assets.setPreferences({ preferWorkers: true }) instead.");
+    this.setPreferences({ preferWorkers: value });
+  }
+  setPreferences(preferences) {
+    this.loader.parsers.forEach((parser) => {
+      if (!parser.config)
+        return;
+      Object.keys(parser.config).filter((key) => key in preferences).forEach((key) => {
+        parser.config[key] = preferences[key];
+      });
+    });
+  }
+}
+const Assets = new AssetsClass();
+extensions$1.handleByList(ExtensionType.LoadParser, Assets.loader.parsers).handleByList(ExtensionType.ResolveParser, Assets.resolver.parsers).handleByList(ExtensionType.CacheParser, Assets.cache.parsers).handleByList(ExtensionType.DetectionParser, Assets.detections);
+
+const cacheTextureArray = {
+  extension: ExtensionType.CacheParser,
+  test: (asset) => Array.isArray(asset) && asset.every((t) => t instanceof Texture),
+  getCacheableAssets: (keys, asset) => {
+    const out = {};
+    keys.forEach((key) => {
+      asset.forEach((item, i) => {
+        out[key + (i === 0 ? "" : i + 1)] = item;
+      });
+    });
+    return out;
+  }
+};
+extensions$1.add(cacheTextureArray);
+
+const detectAvif = {
+  extension: {
+    type: ExtensionType.DetectionParser,
+    priority: 1
+  },
+  test: async () => {
+    if (!globalThis.createImageBitmap)
+      return false;
+    const avifData = "data:image/avif;base64,AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAADybWV0YQAAAAAAAAAoaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAGxpYmF2aWYAAAAADnBpdG0AAAAAAAEAAAAeaWxvYwAAAABEAAABAAEAAAABAAABGgAAAB0AAAAoaWluZgAAAAAAAQAAABppbmZlAgAAAAABAABhdjAxQ29sb3IAAAAAamlwcnAAAABLaXBjbwAAABRpc3BlAAAAAAAAAAIAAAACAAAAEHBpeGkAAAAAAwgICAAAAAxhdjFDgQ0MAAAAABNjb2xybmNseAACAAIAAYAAAAAXaXBtYQAAAAAAAAABAAEEAQKDBAAAACVtZGF0EgAKCBgANogQEAwgMg8f8D///8WfhwB8+ErK42A=";
+    const blob = await settings.ADAPTER.fetch(avifData).then((r) => r.blob());
+    return createImageBitmap(blob).then(() => true, () => false);
+  },
+  add: async (formats) => [...formats, "avif"],
+  remove: async (formats) => formats.filter((f) => f !== "avif")
+};
+extensions$1.add(detectAvif);
+
+const detectWebp = {
+  extension: {
+    type: ExtensionType.DetectionParser,
+    priority: 0
+  },
+  test: async () => {
+    if (!globalThis.createImageBitmap)
+      return false;
+    const webpData = "data:image/webp;base64,UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA=";
+    const blob = await settings.ADAPTER.fetch(webpData).then((r) => r.blob());
+    return createImageBitmap(blob).then(() => true, () => false);
+  },
+  add: async (formats) => [...formats, "webp"],
+  remove: async (formats) => formats.filter((f) => f !== "webp")
+};
+extensions$1.add(detectWebp);
+
+const imageFormats = ["png", "jpg", "jpeg"];
+const detectDefaults = {
+  extension: {
+    type: ExtensionType.DetectionParser,
+    priority: -1
+  },
+  test: () => Promise.resolve(true),
+  add: async (formats) => [...formats, ...imageFormats],
+  remove: async (formats) => formats.filter((f) => !imageFormats.includes(f))
+};
+extensions$1.add(detectDefaults);
+
+const resolveTextureUrl = {
+  extension: ExtensionType.ResolveParser,
+  test: loadTextures.test,
+  parse: (value) => ({
+    resolution: parseFloat(settings.RETINA_PREFIX.exec(value)?.[1] ?? "1"),
+    format: value.split(".").pop(),
+    src: value
+  })
+};
+extensions$1.add(resolveTextureUrl);
+
+var INTERNAL_FORMATS = /* @__PURE__ */ ((INTERNAL_FORMATS2) => {
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGB_S3TC_DXT1_EXT"] = 33776] = "COMPRESSED_RGB_S3TC_DXT1_EXT";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGBA_S3TC_DXT1_EXT"] = 33777] = "COMPRESSED_RGBA_S3TC_DXT1_EXT";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGBA_S3TC_DXT3_EXT"] = 33778] = "COMPRESSED_RGBA_S3TC_DXT3_EXT";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGBA_S3TC_DXT5_EXT"] = 33779] = "COMPRESSED_RGBA_S3TC_DXT5_EXT";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT"] = 35917] = "COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT"] = 35918] = "COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT"] = 35919] = "COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_SRGB_S3TC_DXT1_EXT"] = 35916] = "COMPRESSED_SRGB_S3TC_DXT1_EXT";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_R11_EAC"] = 37488] = "COMPRESSED_R11_EAC";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_SIGNED_R11_EAC"] = 37489] = "COMPRESSED_SIGNED_R11_EAC";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RG11_EAC"] = 37490] = "COMPRESSED_RG11_EAC";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_SIGNED_RG11_EAC"] = 37491] = "COMPRESSED_SIGNED_RG11_EAC";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGB8_ETC2"] = 37492] = "COMPRESSED_RGB8_ETC2";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGBA8_ETC2_EAC"] = 37496] = "COMPRESSED_RGBA8_ETC2_EAC";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_SRGB8_ETC2"] = 37493] = "COMPRESSED_SRGB8_ETC2";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_SRGB8_ALPHA8_ETC2_EAC"] = 37497] = "COMPRESSED_SRGB8_ALPHA8_ETC2_EAC";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2"] = 37494] = "COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2"] = 37495] = "COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGB_PVRTC_4BPPV1_IMG"] = 35840] = "COMPRESSED_RGB_PVRTC_4BPPV1_IMG";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGBA_PVRTC_4BPPV1_IMG"] = 35842] = "COMPRESSED_RGBA_PVRTC_4BPPV1_IMG";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGB_PVRTC_2BPPV1_IMG"] = 35841] = "COMPRESSED_RGB_PVRTC_2BPPV1_IMG";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGBA_PVRTC_2BPPV1_IMG"] = 35843] = "COMPRESSED_RGBA_PVRTC_2BPPV1_IMG";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGB_ETC1_WEBGL"] = 36196] = "COMPRESSED_RGB_ETC1_WEBGL";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGB_ATC_WEBGL"] = 35986] = "COMPRESSED_RGB_ATC_WEBGL";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGBA_ATC_EXPLICIT_ALPHA_WEBGL"] = 35986] = "COMPRESSED_RGBA_ATC_EXPLICIT_ALPHA_WEBGL";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGBA_ATC_INTERPOLATED_ALPHA_WEBGL"] = 34798] = "COMPRESSED_RGBA_ATC_INTERPOLATED_ALPHA_WEBGL";
+  INTERNAL_FORMATS2[INTERNAL_FORMATS2["COMPRESSED_RGBA_ASTC_4x4_KHR"] = 37808] = "COMPRESSED_RGBA_ASTC_4x4_KHR";
+  return INTERNAL_FORMATS2;
+})(INTERNAL_FORMATS || {});
+const INTERNAL_FORMAT_TO_BYTES_PER_PIXEL = {
+  [33776 /* COMPRESSED_RGB_S3TC_DXT1_EXT */]: 0.5,
+  [33777 /* COMPRESSED_RGBA_S3TC_DXT1_EXT */]: 0.5,
+  [33778 /* COMPRESSED_RGBA_S3TC_DXT3_EXT */]: 1,
+  [33779 /* COMPRESSED_RGBA_S3TC_DXT5_EXT */]: 1,
+  [35916 /* COMPRESSED_SRGB_S3TC_DXT1_EXT */]: 0.5,
+  [35917 /* COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT */]: 0.5,
+  [35918 /* COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT */]: 1,
+  [35919 /* COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT */]: 1,
+  [37488 /* COMPRESSED_R11_EAC */]: 0.5,
+  [37489 /* COMPRESSED_SIGNED_R11_EAC */]: 0.5,
+  [37490 /* COMPRESSED_RG11_EAC */]: 1,
+  [37491 /* COMPRESSED_SIGNED_RG11_EAC */]: 1,
+  [37492 /* COMPRESSED_RGB8_ETC2 */]: 0.5,
+  [37496 /* COMPRESSED_RGBA8_ETC2_EAC */]: 1,
+  [37493 /* COMPRESSED_SRGB8_ETC2 */]: 0.5,
+  [37497 /* COMPRESSED_SRGB8_ALPHA8_ETC2_EAC */]: 1,
+  [37494 /* COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2 */]: 0.5,
+  [37495 /* COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2 */]: 0.5,
+  [35840 /* COMPRESSED_RGB_PVRTC_4BPPV1_IMG */]: 0.5,
+  [35842 /* COMPRESSED_RGBA_PVRTC_4BPPV1_IMG */]: 0.5,
+  [35841 /* COMPRESSED_RGB_PVRTC_2BPPV1_IMG */]: 0.25,
+  [35843 /* COMPRESSED_RGBA_PVRTC_2BPPV1_IMG */]: 0.25,
+  [36196 /* COMPRESSED_RGB_ETC1_WEBGL */]: 0.5,
+  [35986 /* COMPRESSED_RGB_ATC_WEBGL */]: 0.5,
+  [35986 /* COMPRESSED_RGBA_ATC_EXPLICIT_ALPHA_WEBGL */]: 1,
+  [34798 /* COMPRESSED_RGBA_ATC_INTERPOLATED_ALPHA_WEBGL */]: 1,
+  [37808 /* COMPRESSED_RGBA_ASTC_4x4_KHR */]: 1
+};
+
+let storedGl;
+let extensions;
+function getCompressedTextureExtensions() {
+  extensions = {
+    s3tc: storedGl.getExtension("WEBGL_compressed_texture_s3tc"),
+    s3tc_sRGB: storedGl.getExtension("WEBGL_compressed_texture_s3tc_srgb"),
+    etc: storedGl.getExtension("WEBGL_compressed_texture_etc"),
+    etc1: storedGl.getExtension("WEBGL_compressed_texture_etc1"),
+    pvrtc: storedGl.getExtension("WEBGL_compressed_texture_pvrtc") || storedGl.getExtension("WEBKIT_WEBGL_compressed_texture_pvrtc"),
+    atc: storedGl.getExtension("WEBGL_compressed_texture_atc"),
+    astc: storedGl.getExtension("WEBGL_compressed_texture_astc")
+  };
+}
+const detectCompressedTextures = {
+  extension: {
+    type: ExtensionType.DetectionParser,
+    priority: 2
+  },
+  test: async () => {
+    const canvas = settings.ADAPTER.createCanvas();
+    const gl = canvas.getContext("webgl");
+    if (!gl) {
+      console.warn("WebGL not available for compressed textures.");
+      return false;
+    }
+    storedGl = gl;
+    return true;
+  },
+  add: async (formats) => {
+    if (!extensions)
+      getCompressedTextureExtensions();
+    const textureFormats = [];
+    for (const extensionName in extensions) {
+      const extension = extensions[extensionName];
+      if (!extension) {
+        continue;
+      }
+      textureFormats.push(extensionName);
+    }
+    return [...textureFormats, ...formats];
+  },
+  remove: async (formats) => {
+    if (!extensions)
+      getCompressedTextureExtensions();
+    return formats.filter((f) => !(f in extensions));
+  }
+};
+extensions$1.add(detectCompressedTextures);
+
+class BlobResource extends BufferResource {
+  constructor(source, options = { width: 1, height: 1, autoLoad: true }) {
+    let origin;
+    let data;
+    if (typeof source === "string") {
+      origin = source;
+      data = new Uint8Array();
+    } else {
+      origin = null;
+      data = source;
+    }
+    super(data, options);
+    this.origin = origin;
+    this.buffer = data ? new ViewableBuffer(data) : null;
+    this._load = null;
+    this.loaded = false;
+    if (this.origin !== null && options.autoLoad !== false) {
+      this.load();
+    }
+    if (this.origin === null && this.buffer) {
+      this._load = Promise.resolve(this);
+      this.loaded = true;
+      this.onBlobLoaded(this.buffer.rawBinaryData);
+    }
+  }
+  onBlobLoaded(_data) {
+  }
+  load() {
+    if (this._load) {
+      return this._load;
+    }
+    this._load = fetch(this.origin).then((response) => response.blob()).then((blob) => blob.arrayBuffer()).then((arrayBuffer) => {
+      this.data = new Uint32Array(arrayBuffer);
+      this.buffer = new ViewableBuffer(arrayBuffer);
+      this.loaded = true;
+      this.onBlobLoaded(arrayBuffer);
+      this.update();
+      return this;
+    });
+    return this._load;
+  }
+}
+
+class CompressedTextureResource extends BlobResource {
+  constructor(source, options) {
+    super(source, options);
+    this.format = options.format;
+    this.levels = options.levels || 1;
+    this._width = options.width;
+    this._height = options.height;
+    this._extension = CompressedTextureResource._formatToExtension(this.format);
+    if (options.levelBuffers || this.buffer) {
+      this._levelBuffers = options.levelBuffers || CompressedTextureResource._createLevelBuffers(source instanceof Uint8Array ? source : this.buffer.uint8View, this.format, this.levels, 4, 4, this.width, this.height);
+    }
+  }
+  upload(renderer, _texture, _glTexture) {
+    const gl = renderer.gl;
+    const extension = renderer.context.extensions[this._extension];
+    if (!extension) {
+      throw new Error(`${this._extension} textures are not supported on the current machine`);
+    }
+    if (!this._levelBuffers) {
+      return false;
+    }
+    for (let i = 0, j = this.levels; i < j; i++) {
+      const { levelID, levelWidth, levelHeight, levelBuffer } = this._levelBuffers[i];
+      gl.compressedTexImage2D(gl.TEXTURE_2D, levelID, this.format, levelWidth, levelHeight, 0, levelBuffer);
+    }
+    return true;
+  }
+  onBlobLoaded() {
+    this._levelBuffers = CompressedTextureResource._createLevelBuffers(this.buffer.uint8View, this.format, this.levels, 4, 4, this.width, this.height);
+  }
+  static _formatToExtension(format) {
+    if (format >= 33776 && format <= 33779) {
+      return "s3tc";
+    } else if (format >= 37488 && format <= 37497) {
+      return "etc";
+    } else if (format >= 35840 && format <= 35843) {
+      return "pvrtc";
+    } else if (format >= 36196) {
+      return "etc1";
+    } else if (format >= 35986 && format <= 34798) {
+      return "atc";
+    }
+    throw new Error("Invalid (compressed) texture format given!");
+  }
+  static _createLevelBuffers(buffer, format, levels, blockWidth, blockHeight, imageWidth, imageHeight) {
+    const buffers = new Array(levels);
+    let offset = buffer.byteOffset;
+    let levelWidth = imageWidth;
+    let levelHeight = imageHeight;
+    let alignedLevelWidth = levelWidth + blockWidth - 1 & ~(blockWidth - 1);
+    let alignedLevelHeight = levelHeight + blockHeight - 1 & ~(blockHeight - 1);
+    let levelSize = alignedLevelWidth * alignedLevelHeight * INTERNAL_FORMAT_TO_BYTES_PER_PIXEL[format];
+    for (let i = 0; i < levels; i++) {
+      buffers[i] = {
+        levelID: i,
+        levelWidth: levels > 1 ? levelWidth : alignedLevelWidth,
+        levelHeight: levels > 1 ? levelHeight : alignedLevelHeight,
+        levelBuffer: new Uint8Array(buffer.buffer, offset, levelSize)
+      };
+      offset += levelSize;
+      levelWidth = levelWidth >> 1 || 1;
+      levelHeight = levelHeight >> 1 || 1;
+      alignedLevelWidth = levelWidth + blockWidth - 1 & ~(blockWidth - 1);
+      alignedLevelHeight = levelHeight + blockHeight - 1 & ~(blockHeight - 1);
+      levelSize = alignedLevelWidth * alignedLevelHeight * INTERNAL_FORMAT_TO_BYTES_PER_PIXEL[format];
+    }
+    return buffers;
+  }
+}
+
+const DDS_MAGIC_SIZE = 4;
+const DDS_HEADER_SIZE = 124;
+const DDS_HEADER_PF_SIZE = 32;
+const DDS_HEADER_DX10_SIZE = 20;
+const DDS_MAGIC = 542327876;
+const DDS_FIELDS = {
+  SIZE: 1,
+  FLAGS: 2,
+  HEIGHT: 3,
+  WIDTH: 4,
+  MIPMAP_COUNT: 7,
+  PIXEL_FORMAT: 19
+};
+const DDS_PF_FIELDS = {
+  SIZE: 0,
+  FLAGS: 1,
+  FOURCC: 2,
+  RGB_BITCOUNT: 3,
+  R_BIT_MASK: 4,
+  G_BIT_MASK: 5,
+  B_BIT_MASK: 6,
+  A_BIT_MASK: 7
+};
+const DDS_DX10_FIELDS = {
+  DXGI_FORMAT: 0,
+  RESOURCE_DIMENSION: 1,
+  MISC_FLAG: 2,
+  ARRAY_SIZE: 3,
+  MISC_FLAGS2: 4
+};
+const PF_FLAGS = 1;
+const DDPF_ALPHA = 2;
+const DDPF_FOURCC = 4;
+const DDPF_RGB = 64;
+const DDPF_YUV = 512;
+const DDPF_LUMINANCE = 131072;
+const FOURCC_DXT1 = 827611204;
+const FOURCC_DXT3 = 861165636;
+const FOURCC_DXT5 = 894720068;
+const FOURCC_DX10 = 808540228;
+const DDS_RESOURCE_MISC_TEXTURECUBE = 4;
+const FOURCC_TO_FORMAT = {
+  [FOURCC_DXT1]: INTERNAL_FORMATS.COMPRESSED_RGBA_S3TC_DXT1_EXT,
+  [FOURCC_DXT3]: INTERNAL_FORMATS.COMPRESSED_RGBA_S3TC_DXT3_EXT,
+  [FOURCC_DXT5]: INTERNAL_FORMATS.COMPRESSED_RGBA_S3TC_DXT5_EXT
+};
+const DXGI_TO_FORMAT = {
+  [70 /* DXGI_FORMAT_BC1_TYPELESS */]: INTERNAL_FORMATS.COMPRESSED_RGBA_S3TC_DXT1_EXT,
+  [71 /* DXGI_FORMAT_BC1_UNORM */]: INTERNAL_FORMATS.COMPRESSED_RGBA_S3TC_DXT1_EXT,
+  [73 /* DXGI_FORMAT_BC2_TYPELESS */]: INTERNAL_FORMATS.COMPRESSED_RGBA_S3TC_DXT3_EXT,
+  [74 /* DXGI_FORMAT_BC2_UNORM */]: INTERNAL_FORMATS.COMPRESSED_RGBA_S3TC_DXT3_EXT,
+  [76 /* DXGI_FORMAT_BC3_TYPELESS */]: INTERNAL_FORMATS.COMPRESSED_RGBA_S3TC_DXT5_EXT,
+  [77 /* DXGI_FORMAT_BC3_UNORM */]: INTERNAL_FORMATS.COMPRESSED_RGBA_S3TC_DXT5_EXT,
+  [72 /* DXGI_FORMAT_BC1_UNORM_SRGB */]: INTERNAL_FORMATS.COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT,
+  [75 /* DXGI_FORMAT_BC2_UNORM_SRGB */]: INTERNAL_FORMATS.COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT,
+  [78 /* DXGI_FORMAT_BC3_UNORM_SRGB */]: INTERNAL_FORMATS.COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
+};
+function parseDDS(arrayBuffer) {
+  const data = new Uint32Array(arrayBuffer);
+  const magicWord = data[0];
+  if (magicWord !== DDS_MAGIC) {
+    throw new Error("Invalid DDS file magic word");
+  }
+  const header = new Uint32Array(arrayBuffer, 0, DDS_HEADER_SIZE / Uint32Array.BYTES_PER_ELEMENT);
+  const height = header[DDS_FIELDS.HEIGHT];
+  const width = header[DDS_FIELDS.WIDTH];
+  const mipmapCount = header[DDS_FIELDS.MIPMAP_COUNT];
+  const pixelFormat = new Uint32Array(arrayBuffer, DDS_FIELDS.PIXEL_FORMAT * Uint32Array.BYTES_PER_ELEMENT, DDS_HEADER_PF_SIZE / Uint32Array.BYTES_PER_ELEMENT);
+  const formatFlags = pixelFormat[PF_FLAGS];
+  if (formatFlags & DDPF_FOURCC) {
+    const fourCC = pixelFormat[DDS_PF_FIELDS.FOURCC];
+    if (fourCC !== FOURCC_DX10) {
+      const internalFormat2 = FOURCC_TO_FORMAT[fourCC];
+      const dataOffset2 = DDS_MAGIC_SIZE + DDS_HEADER_SIZE;
+      const texData = new Uint8Array(arrayBuffer, dataOffset2);
+      const resource = new CompressedTextureResource(texData, {
+        format: internalFormat2,
+        width,
+        height,
+        levels: mipmapCount
+      });
+      return [resource];
+    }
+    const dx10Offset = DDS_MAGIC_SIZE + DDS_HEADER_SIZE;
+    const dx10Header = new Uint32Array(data.buffer, dx10Offset, DDS_HEADER_DX10_SIZE / Uint32Array.BYTES_PER_ELEMENT);
+    const dxgiFormat = dx10Header[DDS_DX10_FIELDS.DXGI_FORMAT];
+    const resourceDimension = dx10Header[DDS_DX10_FIELDS.RESOURCE_DIMENSION];
+    const miscFlag = dx10Header[DDS_DX10_FIELDS.MISC_FLAG];
+    const arraySize = dx10Header[DDS_DX10_FIELDS.ARRAY_SIZE];
+    const internalFormat = DXGI_TO_FORMAT[dxgiFormat];
+    if (internalFormat === void 0) {
+      throw new Error(`DDSParser cannot parse texture data with DXGI format ${dxgiFormat}`);
+    }
+    if (miscFlag === DDS_RESOURCE_MISC_TEXTURECUBE) {
+      throw new Error("DDSParser does not support cubemap textures");
+    }
+    if (resourceDimension === 6 /* DDS_DIMENSION_TEXTURE3D */) {
+      throw new Error("DDSParser does not supported 3D texture data");
+    }
+    const imageBuffers = new Array();
+    const dataOffset = DDS_MAGIC_SIZE + DDS_HEADER_SIZE + DDS_HEADER_DX10_SIZE;
+    if (arraySize === 1) {
+      imageBuffers.push(new Uint8Array(arrayBuffer, dataOffset));
+    } else {
+      const pixelSize = INTERNAL_FORMAT_TO_BYTES_PER_PIXEL[internalFormat];
+      let imageSize = 0;
+      let levelWidth = width;
+      let levelHeight = height;
+      for (let i = 0; i < mipmapCount; i++) {
+        const alignedLevelWidth = Math.max(1, levelWidth + 3 & ~3);
+        const alignedLevelHeight = Math.max(1, levelHeight + 3 & ~3);
+        const levelSize = alignedLevelWidth * alignedLevelHeight * pixelSize;
+        imageSize += levelSize;
+        levelWidth = levelWidth >>> 1;
+        levelHeight = levelHeight >>> 1;
+      }
+      let imageOffset = dataOffset;
+      for (let i = 0; i < arraySize; i++) {
+        imageBuffers.push(new Uint8Array(arrayBuffer, imageOffset, imageSize));
+        imageOffset += imageSize;
+      }
+    }
+    return imageBuffers.map((buffer) => new CompressedTextureResource(buffer, {
+      format: internalFormat,
+      width,
+      height,
+      levels: mipmapCount
+    }));
+  }
+  if (formatFlags & DDPF_RGB) {
+    throw new Error("DDSParser does not support uncompressed texture data.");
+  }
+  if (formatFlags & DDPF_YUV) {
+    throw new Error("DDSParser does not supported YUV uncompressed texture data.");
+  }
+  if (formatFlags & DDPF_LUMINANCE) {
+    throw new Error("DDSParser does not support single-channel (lumninance) texture data!");
+  }
+  if (formatFlags & DDPF_ALPHA) {
+    throw new Error("DDSParser does not support single-channel (alpha) texture data!");
+  }
+  throw new Error("DDSParser failed to load a texture file due to an unknown reason!");
+}
+
+const FILE_IDENTIFIER = [171, 75, 84, 88, 32, 49, 49, 187, 13, 10, 26, 10];
+const ENDIANNESS = 67305985;
+const KTX_FIELDS = {
+  FILE_IDENTIFIER: 0,
+  ENDIANNESS: 12,
+  GL_TYPE: 16,
+  GL_TYPE_SIZE: 20,
+  GL_FORMAT: 24,
+  GL_INTERNAL_FORMAT: 28,
+  GL_BASE_INTERNAL_FORMAT: 32,
+  PIXEL_WIDTH: 36,
+  PIXEL_HEIGHT: 40,
+  PIXEL_DEPTH: 44,
+  NUMBER_OF_ARRAY_ELEMENTS: 48,
+  NUMBER_OF_FACES: 52,
+  NUMBER_OF_MIPMAP_LEVELS: 56,
+  BYTES_OF_KEY_VALUE_DATA: 60
+};
+const FILE_HEADER_SIZE = 64;
+const TYPES_TO_BYTES_PER_COMPONENT = {
+  [TYPES.UNSIGNED_BYTE]: 1,
+  [TYPES.UNSIGNED_SHORT]: 2,
+  [TYPES.INT]: 4,
+  [TYPES.UNSIGNED_INT]: 4,
+  [TYPES.FLOAT]: 4,
+  [TYPES.HALF_FLOAT]: 8
+};
+const FORMATS_TO_COMPONENTS = {
+  [FORMATS.RGBA]: 4,
+  [FORMATS.RGB]: 3,
+  [FORMATS.RG]: 2,
+  [FORMATS.RED]: 1,
+  [FORMATS.LUMINANCE]: 1,
+  [FORMATS.LUMINANCE_ALPHA]: 2,
+  [FORMATS.ALPHA]: 1
+};
+const TYPES_TO_BYTES_PER_PIXEL = {
+  [TYPES.UNSIGNED_SHORT_4_4_4_4]: 2,
+  [TYPES.UNSIGNED_SHORT_5_5_5_1]: 2,
+  [TYPES.UNSIGNED_SHORT_5_6_5]: 2
+};
+function parseKTX(url, arrayBuffer, loadKeyValueData = false) {
+  const dataView = new DataView(arrayBuffer);
+  if (!validate(url, dataView)) {
+    return null;
+  }
+  const littleEndian = dataView.getUint32(KTX_FIELDS.ENDIANNESS, true) === ENDIANNESS;
+  const glType = dataView.getUint32(KTX_FIELDS.GL_TYPE, littleEndian);
+  const glFormat = dataView.getUint32(KTX_FIELDS.GL_FORMAT, littleEndian);
+  const glInternalFormat = dataView.getUint32(KTX_FIELDS.GL_INTERNAL_FORMAT, littleEndian);
+  const pixelWidth = dataView.getUint32(KTX_FIELDS.PIXEL_WIDTH, littleEndian);
+  const pixelHeight = dataView.getUint32(KTX_FIELDS.PIXEL_HEIGHT, littleEndian) || 1;
+  const pixelDepth = dataView.getUint32(KTX_FIELDS.PIXEL_DEPTH, littleEndian) || 1;
+  const numberOfArrayElements = dataView.getUint32(KTX_FIELDS.NUMBER_OF_ARRAY_ELEMENTS, littleEndian) || 1;
+  const numberOfFaces = dataView.getUint32(KTX_FIELDS.NUMBER_OF_FACES, littleEndian);
+  const numberOfMipmapLevels = dataView.getUint32(KTX_FIELDS.NUMBER_OF_MIPMAP_LEVELS, littleEndian);
+  const bytesOfKeyValueData = dataView.getUint32(KTX_FIELDS.BYTES_OF_KEY_VALUE_DATA, littleEndian);
+  if (pixelHeight === 0 || pixelDepth !== 1) {
+    throw new Error("Only 2D textures are supported");
+  }
+  if (numberOfFaces !== 1) {
+    throw new Error("CubeTextures are not supported by KTXLoader yet!");
+  }
+  if (numberOfArrayElements !== 1) {
+    throw new Error("WebGL does not support array textures");
+  }
+  const blockWidth = 4;
+  const blockHeight = 4;
+  const alignedWidth = pixelWidth + 3 & ~3;
+  const alignedHeight = pixelHeight + 3 & ~3;
+  const imageBuffers = new Array(numberOfArrayElements);
+  let imagePixels = pixelWidth * pixelHeight;
+  if (glType === 0) {
+    imagePixels = alignedWidth * alignedHeight;
+  }
+  let imagePixelByteSize;
+  if (glType !== 0) {
+    if (TYPES_TO_BYTES_PER_COMPONENT[glType]) {
+      imagePixelByteSize = TYPES_TO_BYTES_PER_COMPONENT[glType] * FORMATS_TO_COMPONENTS[glFormat];
+    } else {
+      imagePixelByteSize = TYPES_TO_BYTES_PER_PIXEL[glType];
+    }
+  } else {
+    imagePixelByteSize = INTERNAL_FORMAT_TO_BYTES_PER_PIXEL[glInternalFormat];
+  }
+  if (imagePixelByteSize === void 0) {
+    throw new Error("Unable to resolve the pixel format stored in the *.ktx file!");
+  }
+  const kvData = loadKeyValueData ? parseKvData(dataView, bytesOfKeyValueData, littleEndian) : null;
+  const imageByteSize = imagePixels * imagePixelByteSize;
+  let mipByteSize = imageByteSize;
+  let mipWidth = pixelWidth;
+  let mipHeight = pixelHeight;
+  let alignedMipWidth = alignedWidth;
+  let alignedMipHeight = alignedHeight;
+  let imageOffset = FILE_HEADER_SIZE + bytesOfKeyValueData;
+  for (let mipmapLevel = 0; mipmapLevel < numberOfMipmapLevels; mipmapLevel++) {
+    const imageSize = dataView.getUint32(imageOffset, littleEndian);
+    let elementOffset = imageOffset + 4;
+    for (let arrayElement = 0; arrayElement < numberOfArrayElements; arrayElement++) {
+      let mips = imageBuffers[arrayElement];
+      if (!mips) {
+        mips = imageBuffers[arrayElement] = new Array(numberOfMipmapLevels);
+      }
+      mips[mipmapLevel] = {
+        levelID: mipmapLevel,
+        levelWidth: numberOfMipmapLevels > 1 || glType !== 0 ? mipWidth : alignedMipWidth,
+        levelHeight: numberOfMipmapLevels > 1 || glType !== 0 ? mipHeight : alignedMipHeight,
+        levelBuffer: new Uint8Array(arrayBuffer, elementOffset, mipByteSize)
+      };
+      elementOffset += mipByteSize;
+    }
+    imageOffset += imageSize + 4;
+    imageOffset = imageOffset % 4 !== 0 ? imageOffset + 4 - imageOffset % 4 : imageOffset;
+    mipWidth = mipWidth >> 1 || 1;
+    mipHeight = mipHeight >> 1 || 1;
+    alignedMipWidth = mipWidth + blockWidth - 1 & ~(blockWidth - 1);
+    alignedMipHeight = mipHeight + blockHeight - 1 & ~(blockHeight - 1);
+    mipByteSize = alignedMipWidth * alignedMipHeight * imagePixelByteSize;
+  }
+  if (glType !== 0) {
+    return {
+      uncompressed: imageBuffers.map((levelBuffers) => {
+        let buffer = levelBuffers[0].levelBuffer;
+        let convertToInt = false;
+        if (glType === TYPES.FLOAT) {
+          buffer = new Float32Array(levelBuffers[0].levelBuffer.buffer, levelBuffers[0].levelBuffer.byteOffset, levelBuffers[0].levelBuffer.byteLength / 4);
+        } else if (glType === TYPES.UNSIGNED_INT) {
+          convertToInt = true;
+          buffer = new Uint32Array(levelBuffers[0].levelBuffer.buffer, levelBuffers[0].levelBuffer.byteOffset, levelBuffers[0].levelBuffer.byteLength / 4);
+        } else if (glType === TYPES.INT) {
+          convertToInt = true;
+          buffer = new Int32Array(levelBuffers[0].levelBuffer.buffer, levelBuffers[0].levelBuffer.byteOffset, levelBuffers[0].levelBuffer.byteLength / 4);
+        }
+        return {
+          resource: new BufferResource(buffer, {
+            width: levelBuffers[0].levelWidth,
+            height: levelBuffers[0].levelHeight
+          }),
+          type: glType,
+          format: convertToInt ? convertFormatToInteger(glFormat) : glFormat
+        };
+      }),
+      kvData
+    };
+  }
+  return {
+    compressed: imageBuffers.map((levelBuffers) => new CompressedTextureResource(null, {
+      format: glInternalFormat,
+      width: pixelWidth,
+      height: pixelHeight,
+      levels: numberOfMipmapLevels,
+      levelBuffers
+    })),
+    kvData
+  };
+}
+function validate(url, dataView) {
+  for (let i = 0; i < FILE_IDENTIFIER.length; i++) {
+    if (dataView.getUint8(i) !== FILE_IDENTIFIER[i]) {
+      console.error(`${url} is not a valid *.ktx file!`);
+      return false;
+    }
+  }
+  return true;
+}
+function convertFormatToInteger(format) {
+  switch (format) {
+    case FORMATS.RGBA:
+      return FORMATS.RGBA_INTEGER;
+    case FORMATS.RGB:
+      return FORMATS.RGB_INTEGER;
+    case FORMATS.RG:
+      return FORMATS.RG_INTEGER;
+    case FORMATS.RED:
+      return FORMATS.RED_INTEGER;
+    default:
+      return format;
+  }
+}
+function parseKvData(dataView, bytesOfKeyValueData, littleEndian) {
+  const kvData = /* @__PURE__ */ new Map();
+  let bytesIntoKeyValueData = 0;
+  while (bytesIntoKeyValueData < bytesOfKeyValueData) {
+    const keyAndValueByteSize = dataView.getUint32(FILE_HEADER_SIZE + bytesIntoKeyValueData, littleEndian);
+    const keyAndValueByteOffset = FILE_HEADER_SIZE + bytesIntoKeyValueData + 4;
+    const valuePadding = 3 - (keyAndValueByteSize + 3) % 4;
+    if (keyAndValueByteSize === 0 || keyAndValueByteSize > bytesOfKeyValueData - bytesIntoKeyValueData) {
+      console.error("KTXLoader: keyAndValueByteSize out of bounds");
+      break;
+    }
+    let keyNulByte = 0;
+    for (; keyNulByte < keyAndValueByteSize; keyNulByte++) {
+      if (dataView.getUint8(keyAndValueByteOffset + keyNulByte) === 0) {
+        break;
+      }
+    }
+    if (keyNulByte === -1) {
+      console.error("KTXLoader: Failed to find null byte terminating kvData key");
+      break;
+    }
+    const key = new TextDecoder().decode(new Uint8Array(dataView.buffer, keyAndValueByteOffset, keyNulByte));
+    const value = new DataView(dataView.buffer, keyAndValueByteOffset + keyNulByte + 1, keyAndValueByteSize - keyNulByte - 1);
+    kvData.set(key, value);
+    bytesIntoKeyValueData += 4 + keyAndValueByteSize + valuePadding;
+  }
+  return kvData;
+}
+
+const loadDDS = {
+  extension: {
+    type: ExtensionType.LoadParser,
+    priority: LoaderParserPriority.High
+  },
+  name: "loadDDS",
+  test(url) {
+    return checkExtension(url, ".dds");
+  },
+  async load(url, asset, loader) {
+    const response = await settings.ADAPTER.fetch(url);
+    const arrayBuffer = await response.arrayBuffer();
+    const resources = parseDDS(arrayBuffer);
+    const textures = resources.map((resource) => {
+      const base = new BaseTexture(resource, {
+        mipmap: MIPMAP_MODES.OFF,
+        alphaMode: ALPHA_MODES.NO_PREMULTIPLIED_ALPHA,
+        resolution: getResolutionOfUrl(url),
+        ...asset.data
+      });
+      return createTexture(base, loader, url);
+    });
+    return textures.length === 1 ? textures[0] : textures;
+  },
+  unload(texture) {
+    if (Array.isArray(texture)) {
+      texture.forEach((t) => t.destroy(true));
+    } else {
+      texture.destroy(true);
+    }
+  }
+};
+extensions$1.add(loadDDS);
+
+const loadKTX = {
+  extension: {
+    type: ExtensionType.LoadParser,
+    priority: LoaderParserPriority.High
+  },
+  name: "loadKTX",
+  test(url) {
+    return checkExtension(url, ".ktx");
+  },
+  async load(url, asset, loader) {
+    const response = await settings.ADAPTER.fetch(url);
+    const arrayBuffer = await response.arrayBuffer();
+    const { compressed, uncompressed, kvData } = parseKTX(url, arrayBuffer);
+    const resources = compressed ?? uncompressed;
+    const options = {
+      mipmap: MIPMAP_MODES.OFF,
+      alphaMode: ALPHA_MODES.NO_PREMULTIPLIED_ALPHA,
+      resolution: getResolutionOfUrl(url),
+      ...asset.data
+    };
+    const textures = resources.map((resource) => {
+      if (resources === uncompressed) {
+        Object.assign(options, {
+          type: resource.type,
+          format: resource.format
+        });
+      }
+      const base = new BaseTexture(resource, options);
+      base.ktxKeyValueData = kvData;
+      return createTexture(base, loader, url);
+    });
+    return textures.length === 1 ? textures[0] : textures;
+  },
+  unload(texture) {
+    if (Array.isArray(texture)) {
+      texture.forEach((t) => t.destroy(true));
+    } else {
+      texture.destroy(true);
+    }
+  }
+};
+extensions$1.add(loadKTX);
+
+const resolveCompressedTextureUrl = {
+  extension: ExtensionType.ResolveParser,
+  test: (value) => {
+    const temp = value.split("?")[0];
+    const extension = temp.split(".").pop();
+    return ["basis", "ktx", "dds"].includes(extension);
+  },
+  parse: (value) => {
+    const temp = value.split("?")[0];
+    const extension = temp.split(".").pop();
+    if (extension === "ktx") {
+      const extensions2 = [
+        ".s3tc.ktx",
+        ".s3tc_sRGB.ktx",
+        ".etc.ktx",
+        ".etc1.ktx",
+        ".pvrt.ktx",
+        ".atc.ktx",
+        ".astc.ktx"
+      ];
+      if (extensions2.some((ext) => value.endsWith(ext))) {
+        return {
+          resolution: parseFloat(settings.RETINA_PREFIX.exec(value)?.[1] ?? "1"),
+          format: extensions2.find((ext) => value.endsWith(ext)),
+          src: value
+        };
+      }
+    }
+    return {
+      resolution: parseFloat(settings.RETINA_PREFIX.exec(value)?.[1] ?? "1"),
+      format: value.split(".").pop(),
+      src: value
+    };
+  }
+};
+extensions$1.add(resolveCompressedTextureUrl);
+
+const TEMP_RECT = new Rectangle();
+const BYTES_PER_PIXEL = 4;
+const _Extract = class {
+  constructor(renderer) {
+    this.renderer = renderer;
+  }
+  async image(target, format, quality) {
+    const image = new Image();
+    image.src = await this.base64(target, format, quality);
+    return image;
+  }
+  async base64(target, format, quality) {
+    const canvas = this.canvas(target);
+    if (canvas.toBlob !== void 0) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            reject(new Error("ICanvas.toBlob failed!"));
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        }, format, quality);
+      });
+    }
+    if (canvas.toDataURL !== void 0) {
+      return canvas.toDataURL(format, quality);
+    }
+    if (canvas.convertToBlob !== void 0) {
+      const blob = await canvas.convertToBlob({ type: format, quality });
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+    throw new Error("Extract.base64() requires ICanvas.toDataURL, ICanvas.toBlob, or ICanvas.convertToBlob to be implemented");
+  }
+  canvas(target, frame) {
+    const { pixels, width, height, flipY } = this._rawPixels(target, frame);
+    if (flipY) {
+      _Extract._flipY(pixels, width, height);
+    }
+    _Extract._unpremultiplyAlpha(pixels);
+    const canvasBuffer = new CanvasRenderTarget(width, height, 1);
+    const imageData = new ImageData(new Uint8ClampedArray(pixels.buffer), width, height);
+    canvasBuffer.context.putImageData(imageData, 0, 0);
+    return canvasBuffer.canvas;
+  }
+  pixels(target, frame) {
+    const { pixels, width, height, flipY } = this._rawPixels(target, frame);
+    if (flipY) {
+      _Extract._flipY(pixels, width, height);
+    }
+    _Extract._unpremultiplyAlpha(pixels);
+    return pixels;
+  }
+  _rawPixels(target, frame) {
+    const renderer = this.renderer;
+    if (!renderer) {
+      throw new Error("The Extract has already been destroyed");
+    }
+    let resolution;
+    let flipY = false;
+    let renderTexture;
+    let generated = false;
+    if (target) {
+      if (target instanceof RenderTexture) {
+        renderTexture = target;
+      } else {
+        renderTexture = renderer.generateTexture(target, {
+          resolution: renderer.resolution,
+          multisample: renderer.multisample
+        });
+        generated = true;
+      }
+    }
+    if (renderTexture) {
+      resolution = renderTexture.baseTexture.resolution;
+      frame = frame ?? renderTexture.frame;
+      flipY = false;
+      if (!generated) {
+        renderer.renderTexture.bind(renderTexture);
+        const fbo = renderTexture.framebuffer.glFramebuffers[renderer.CONTEXT_UID];
+        if (fbo.blitFramebuffer) {
+          renderer.framebuffer.bind(fbo.blitFramebuffer);
+        }
+      }
+    } else {
+      resolution = renderer.resolution;
+      if (!frame) {
+        frame = TEMP_RECT;
+        frame.width = renderer.width / resolution;
+        frame.height = renderer.height / resolution;
+      }
+      flipY = true;
+      renderer.renderTexture.bind();
+    }
+    const width = Math.round(frame.width * resolution);
+    const height = Math.round(frame.height * resolution);
+    const pixels = new Uint8Array(BYTES_PER_PIXEL * width * height);
+    const gl = renderer.gl;
+    gl.readPixels(Math.round(frame.x * resolution), Math.round(frame.y * resolution), width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    if (generated) {
+      renderTexture?.destroy(true);
+    }
+    return { pixels, width, height, flipY };
+  }
+  destroy() {
+    this.renderer = null;
+  }
+  static _flipY(pixels, width, height) {
+    const w = width << 2;
+    const h = height >> 1;
+    const temp = new Uint8Array(w);
+    for (let y = 0; y < h; y++) {
+      const t = y * w;
+      const b = (height - y - 1) * w;
+      temp.set(pixels.subarray(t, t + w));
+      pixels.copyWithin(t, b, b + w);
+      pixels.set(temp, b);
+    }
+  }
+  static _unpremultiplyAlpha(pixels) {
+    if (pixels instanceof Uint8ClampedArray) {
+      pixels = new Uint8Array(pixels.buffer);
+    }
+    const n = pixels.length;
+    for (let i = 0; i < n; i += 4) {
+      const alpha = pixels[i + 3];
+      if (alpha !== 0) {
+        const a = 255.001 / alpha;
+        pixels[i] = pixels[i] * a + 0.5;
+        pixels[i + 1] = pixels[i + 1] * a + 0.5;
+        pixels[i + 2] = pixels[i + 2] * a + 0.5;
+      }
+    }
+  }
+};
+let Extract = _Extract;
+Extract.extension = {
+  name: "extract",
+  type: ExtensionType.RendererSystem
+};
+extensions$1.add(Extract);
 
 const buildCircle = {
   build(graphicsData) {
@@ -25906,6 +31443,3904 @@ const _Graphics = class extends Container {
 let Graphics = _Graphics;
 Graphics.curves = curves;
 Graphics._TEMP_POINT = new Point();
+
+class MeshBatchUvs {
+  constructor(uvBuffer, uvMatrix) {
+    this.uvBuffer = uvBuffer;
+    this.uvMatrix = uvMatrix;
+    this.data = null;
+    this._bufferUpdateId = -1;
+    this._textureUpdateId = -1;
+    this._updateID = 0;
+  }
+  update(forceUpdate) {
+    if (!forceUpdate && this._bufferUpdateId === this.uvBuffer._updateID && this._textureUpdateId === this.uvMatrix._updateID) {
+      return;
+    }
+    this._bufferUpdateId = this.uvBuffer._updateID;
+    this._textureUpdateId = this.uvMatrix._updateID;
+    const data = this.uvBuffer.data;
+    if (!this.data || this.data.length !== data.length) {
+      this.data = new Float32Array(data.length);
+    }
+    this.uvMatrix.multiplyUvs(data, this.data);
+    this._updateID++;
+  }
+}
+
+const tempPoint = new Point();
+const tempPolygon = new Polygon();
+const _Mesh = class extends Container {
+  constructor(geometry, shader, state, drawMode = DRAW_MODES.TRIANGLES) {
+    super();
+    this.geometry = geometry;
+    this.shader = shader;
+    this.state = state || State.for2d();
+    this.drawMode = drawMode;
+    this.start = 0;
+    this.size = 0;
+    this.uvs = null;
+    this.indices = null;
+    this.vertexData = new Float32Array(1);
+    this.vertexDirty = -1;
+    this._transformID = -1;
+    this._roundPixels = settings.ROUND_PIXELS;
+    this.batchUvs = null;
+  }
+  get geometry() {
+    return this._geometry;
+  }
+  set geometry(value) {
+    if (this._geometry === value) {
+      return;
+    }
+    if (this._geometry) {
+      this._geometry.refCount--;
+      if (this._geometry.refCount === 0) {
+        this._geometry.dispose();
+      }
+    }
+    this._geometry = value;
+    if (this._geometry) {
+      this._geometry.refCount++;
+    }
+    this.vertexDirty = -1;
+  }
+  get uvBuffer() {
+    return this.geometry.buffers[1];
+  }
+  get verticesBuffer() {
+    return this.geometry.buffers[0];
+  }
+  set material(value) {
+    this.shader = value;
+  }
+  get material() {
+    return this.shader;
+  }
+  set blendMode(value) {
+    this.state.blendMode = value;
+  }
+  get blendMode() {
+    return this.state.blendMode;
+  }
+  set roundPixels(value) {
+    if (this._roundPixels !== value) {
+      this._transformID = -1;
+    }
+    this._roundPixels = value;
+  }
+  get roundPixels() {
+    return this._roundPixels;
+  }
+  get tint() {
+    return "tint" in this.shader ? this.shader.tint : null;
+  }
+  set tint(value) {
+    this.shader.tint = value;
+  }
+  get tintValue() {
+    return this.shader.tintValue;
+  }
+  get texture() {
+    return "texture" in this.shader ? this.shader.texture : null;
+  }
+  set texture(value) {
+    this.shader.texture = value;
+  }
+  _render(renderer) {
+    const vertices = this.geometry.buffers[0].data;
+    const shader = this.shader;
+    if (shader.batchable && this.drawMode === DRAW_MODES.TRIANGLES && vertices.length < _Mesh.BATCHABLE_SIZE * 2) {
+      this._renderToBatch(renderer);
+    } else {
+      this._renderDefault(renderer);
+    }
+  }
+  _renderDefault(renderer) {
+    const shader = this.shader;
+    shader.alpha = this.worldAlpha;
+    if (shader.update) {
+      shader.update();
+    }
+    renderer.batch.flush();
+    shader.uniforms.translationMatrix = this.transform.worldTransform.toArray(true);
+    renderer.shader.bind(shader);
+    renderer.state.set(this.state);
+    renderer.geometry.bind(this.geometry, shader);
+    renderer.geometry.draw(this.drawMode, this.size, this.start, this.geometry.instanceCount);
+  }
+  _renderToBatch(renderer) {
+    const geometry = this.geometry;
+    const shader = this.shader;
+    if (shader.uvMatrix) {
+      shader.uvMatrix.update();
+      this.calculateUvs();
+    }
+    this.calculateVertices();
+    this.indices = geometry.indexBuffer.data;
+    this._tintRGB = shader._tintRGB;
+    this._texture = shader.texture;
+    const pluginName = this.material.pluginName;
+    renderer.batch.setObjectRenderer(renderer.plugins[pluginName]);
+    renderer.plugins[pluginName].render(this);
+  }
+  calculateVertices() {
+    const geometry = this.geometry;
+    const verticesBuffer = geometry.buffers[0];
+    const vertices = verticesBuffer.data;
+    const vertexDirtyId = verticesBuffer._updateID;
+    if (vertexDirtyId === this.vertexDirty && this._transformID === this.transform._worldID) {
+      return;
+    }
+    this._transformID = this.transform._worldID;
+    if (this.vertexData.length !== vertices.length) {
+      this.vertexData = new Float32Array(vertices.length);
+    }
+    const wt = this.transform.worldTransform;
+    const a = wt.a;
+    const b = wt.b;
+    const c = wt.c;
+    const d = wt.d;
+    const tx = wt.tx;
+    const ty = wt.ty;
+    const vertexData = this.vertexData;
+    for (let i = 0; i < vertexData.length / 2; i++) {
+      const x = vertices[i * 2];
+      const y = vertices[i * 2 + 1];
+      vertexData[i * 2] = a * x + c * y + tx;
+      vertexData[i * 2 + 1] = b * x + d * y + ty;
+    }
+    if (this._roundPixels) {
+      const resolution = settings.RESOLUTION;
+      for (let i = 0; i < vertexData.length; ++i) {
+        vertexData[i] = Math.round(vertexData[i] * resolution) / resolution;
+      }
+    }
+    this.vertexDirty = vertexDirtyId;
+  }
+  calculateUvs() {
+    const geomUvs = this.geometry.buffers[1];
+    const shader = this.shader;
+    if (!shader.uvMatrix.isSimple) {
+      if (!this.batchUvs) {
+        this.batchUvs = new MeshBatchUvs(geomUvs, shader.uvMatrix);
+      }
+      this.batchUvs.update();
+      this.uvs = this.batchUvs.data;
+    } else {
+      this.uvs = geomUvs.data;
+    }
+  }
+  _calculateBounds() {
+    this.calculateVertices();
+    this._bounds.addVertexData(this.vertexData, 0, this.vertexData.length);
+  }
+  containsPoint(point) {
+    if (!this.getBounds().contains(point.x, point.y)) {
+      return false;
+    }
+    this.worldTransform.applyInverse(point, tempPoint);
+    const vertices = this.geometry.getBuffer("aVertexPosition").data;
+    const points = tempPolygon.points;
+    const indices = this.geometry.getIndex().data;
+    const len = indices.length;
+    const step = this.drawMode === 4 ? 3 : 1;
+    for (let i = 0; i + 2 < len; i += step) {
+      const ind0 = indices[i] * 2;
+      const ind1 = indices[i + 1] * 2;
+      const ind2 = indices[i + 2] * 2;
+      points[0] = vertices[ind0];
+      points[1] = vertices[ind0 + 1];
+      points[2] = vertices[ind1];
+      points[3] = vertices[ind1 + 1];
+      points[4] = vertices[ind2];
+      points[5] = vertices[ind2 + 1];
+      if (tempPolygon.contains(tempPoint.x, tempPoint.y)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  destroy(options) {
+    super.destroy(options);
+    if (this._cachedTexture) {
+      this._cachedTexture.destroy();
+      this._cachedTexture = null;
+    }
+    this.geometry = null;
+    this.shader = null;
+    this.state = null;
+    this.uvs = null;
+    this.indices = null;
+    this.vertexData = null;
+  }
+};
+let Mesh = _Mesh;
+Mesh.BATCHABLE_SIZE = 100;
+
+class MeshGeometry extends Geometry {
+  constructor(vertices, uvs, index) {
+    super();
+    const verticesBuffer = new Buffer(vertices);
+    const uvsBuffer = new Buffer(uvs, true);
+    const indexBuffer = new Buffer(index, true, true);
+    this.addAttribute("aVertexPosition", verticesBuffer, 2, false, TYPES.FLOAT).addAttribute("aTextureCoord", uvsBuffer, 2, false, TYPES.FLOAT).addIndex(indexBuffer);
+    this._updateId = -1;
+  }
+  get vertexDirtyId() {
+    return this.buffers[0]._updateID;
+  }
+}
+
+var fragment$1 = "varying vec2 vTextureCoord;\nuniform vec4 uColor;\n\nuniform sampler2D uSampler;\n\nvoid main(void)\n{\n    gl_FragColor = texture2D(uSampler, vTextureCoord) * uColor;\n}\n";
+
+var vertex$1 = "attribute vec2 aVertexPosition;\nattribute vec2 aTextureCoord;\n\nuniform mat3 projectionMatrix;\nuniform mat3 translationMatrix;\nuniform mat3 uTextureMatrix;\n\nvarying vec2 vTextureCoord;\n\nvoid main(void)\n{\n    gl_Position = vec4((projectionMatrix * translationMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);\n\n    vTextureCoord = (uTextureMatrix * vec3(aTextureCoord, 1.0)).xy;\n}\n";
+
+class MeshMaterial extends Shader {
+  constructor(uSampler, options) {
+    const uniforms = {
+      uSampler,
+      alpha: 1,
+      uTextureMatrix: Matrix.IDENTITY,
+      uColor: new Float32Array([1, 1, 1, 1])
+    };
+    options = Object.assign({
+      tint: 16777215,
+      alpha: 1,
+      pluginName: "batch"
+    }, options);
+    if (options.uniforms) {
+      Object.assign(uniforms, options.uniforms);
+    }
+    super(options.program || Program.from(vertex$1, fragment$1), uniforms);
+    this._colorDirty = false;
+    this.uvMatrix = new TextureMatrix(uSampler);
+    this.batchable = options.program === void 0;
+    this.pluginName = options.pluginName;
+    this._tintColor = new Color(options.tint);
+    this._tintRGB = this._tintColor.toLittleEndianNumber();
+    this._colorDirty = true;
+    this.alpha = options.alpha;
+  }
+  get texture() {
+    return this.uniforms.uSampler;
+  }
+  set texture(value) {
+    if (this.uniforms.uSampler !== value) {
+      if (!this.uniforms.uSampler.baseTexture.alphaMode !== !value.baseTexture.alphaMode) {
+        this._colorDirty = true;
+      }
+      this.uniforms.uSampler = value;
+      this.uvMatrix.texture = value;
+    }
+  }
+  set alpha(value) {
+    if (value === this._alpha)
+      return;
+    this._alpha = value;
+    this._colorDirty = true;
+  }
+  get alpha() {
+    return this._alpha;
+  }
+  set tint(value) {
+    if (value === this.tint)
+      return;
+    this._tintColor.setValue(value);
+    this._tintRGB = this._tintColor.toLittleEndianNumber();
+    this._colorDirty = true;
+  }
+  get tint() {
+    return this._tintColor.value;
+  }
+  get tintValue() {
+    return this._tintColor.toNumber();
+  }
+  update() {
+    if (this._colorDirty) {
+      this._colorDirty = false;
+      const baseTexture = this.texture.baseTexture;
+      const applyToChannels = baseTexture.alphaMode;
+      Color.shared.setValue(this._tintColor).premultiply(this._alpha, applyToChannels).toArray(this.uniforms.uColor);
+    }
+    if (this.uvMatrix.update()) {
+      this.uniforms.uTextureMatrix = this.uvMatrix.mapCoord;
+    }
+  }
+}
+
+class ParticleBuffer {
+  constructor(properties, dynamicPropertyFlags, size) {
+    this.geometry = new Geometry();
+    this.indexBuffer = null;
+    this.size = size;
+    this.dynamicProperties = [];
+    this.staticProperties = [];
+    for (let i = 0; i < properties.length; ++i) {
+      let property = properties[i];
+      property = {
+        attributeName: property.attributeName,
+        size: property.size,
+        uploadFunction: property.uploadFunction,
+        type: property.type || TYPES.FLOAT,
+        offset: property.offset
+      };
+      if (dynamicPropertyFlags[i]) {
+        this.dynamicProperties.push(property);
+      } else {
+        this.staticProperties.push(property);
+      }
+    }
+    this.staticStride = 0;
+    this.staticBuffer = null;
+    this.staticData = null;
+    this.staticDataUint32 = null;
+    this.dynamicStride = 0;
+    this.dynamicBuffer = null;
+    this.dynamicData = null;
+    this.dynamicDataUint32 = null;
+    this._updateID = 0;
+    this.initBuffers();
+  }
+  initBuffers() {
+    const geometry = this.geometry;
+    let dynamicOffset = 0;
+    this.indexBuffer = new Buffer(createIndicesForQuads(this.size), true, true);
+    geometry.addIndex(this.indexBuffer);
+    this.dynamicStride = 0;
+    for (let i = 0; i < this.dynamicProperties.length; ++i) {
+      const property = this.dynamicProperties[i];
+      property.offset = dynamicOffset;
+      dynamicOffset += property.size;
+      this.dynamicStride += property.size;
+    }
+    const dynBuffer = new ArrayBuffer(this.size * this.dynamicStride * 4 * 4);
+    this.dynamicData = new Float32Array(dynBuffer);
+    this.dynamicDataUint32 = new Uint32Array(dynBuffer);
+    this.dynamicBuffer = new Buffer(this.dynamicData, false, false);
+    let staticOffset = 0;
+    this.staticStride = 0;
+    for (let i = 0; i < this.staticProperties.length; ++i) {
+      const property = this.staticProperties[i];
+      property.offset = staticOffset;
+      staticOffset += property.size;
+      this.staticStride += property.size;
+    }
+    const statBuffer = new ArrayBuffer(this.size * this.staticStride * 4 * 4);
+    this.staticData = new Float32Array(statBuffer);
+    this.staticDataUint32 = new Uint32Array(statBuffer);
+    this.staticBuffer = new Buffer(this.staticData, true, false);
+    for (let i = 0; i < this.dynamicProperties.length; ++i) {
+      const property = this.dynamicProperties[i];
+      geometry.addAttribute(property.attributeName, this.dynamicBuffer, 0, property.type === TYPES.UNSIGNED_BYTE, property.type, this.dynamicStride * 4, property.offset * 4);
+    }
+    for (let i = 0; i < this.staticProperties.length; ++i) {
+      const property = this.staticProperties[i];
+      geometry.addAttribute(property.attributeName, this.staticBuffer, 0, property.type === TYPES.UNSIGNED_BYTE, property.type, this.staticStride * 4, property.offset * 4);
+    }
+  }
+  uploadDynamic(children, startIndex, amount) {
+    for (let i = 0; i < this.dynamicProperties.length; i++) {
+      const property = this.dynamicProperties[i];
+      property.uploadFunction(children, startIndex, amount, property.type === TYPES.UNSIGNED_BYTE ? this.dynamicDataUint32 : this.dynamicData, this.dynamicStride, property.offset);
+    }
+    this.dynamicBuffer._updateID++;
+  }
+  uploadStatic(children, startIndex, amount) {
+    for (let i = 0; i < this.staticProperties.length; i++) {
+      const property = this.staticProperties[i];
+      property.uploadFunction(children, startIndex, amount, property.type === TYPES.UNSIGNED_BYTE ? this.staticDataUint32 : this.staticData, this.staticStride, property.offset);
+    }
+    this.staticBuffer._updateID++;
+  }
+  destroy() {
+    this.indexBuffer = null;
+    this.dynamicProperties = null;
+    this.dynamicBuffer = null;
+    this.dynamicData = null;
+    this.dynamicDataUint32 = null;
+    this.staticProperties = null;
+    this.staticBuffer = null;
+    this.staticData = null;
+    this.staticDataUint32 = null;
+    this.geometry.destroy();
+  }
+}
+
+var fragment = "varying vec2 vTextureCoord;\nvarying vec4 vColor;\n\nuniform sampler2D uSampler;\n\nvoid main(void){\n    vec4 color = texture2D(uSampler, vTextureCoord) * vColor;\n    gl_FragColor = color;\n}";
+
+var vertex = "attribute vec2 aVertexPosition;\nattribute vec2 aTextureCoord;\nattribute vec4 aColor;\n\nattribute vec2 aPositionCoord;\nattribute float aRotation;\n\nuniform mat3 translationMatrix;\nuniform vec4 uColor;\n\nvarying vec2 vTextureCoord;\nvarying vec4 vColor;\n\nvoid main(void){\n    float x = (aVertexPosition.x) * cos(aRotation) - (aVertexPosition.y) * sin(aRotation);\n    float y = (aVertexPosition.x) * sin(aRotation) + (aVertexPosition.y) * cos(aRotation);\n\n    vec2 v = vec2(x, y);\n    v = v + aPositionCoord;\n\n    gl_Position = vec4((translationMatrix * vec3(v, 1.0)).xy, 0.0, 1.0);\n\n    vTextureCoord = aTextureCoord;\n    vColor = aColor * uColor;\n}\n";
+
+class ParticleRenderer extends ObjectRenderer {
+  constructor(renderer) {
+    super(renderer);
+    this.shader = null;
+    this.properties = null;
+    this.tempMatrix = new Matrix();
+    this.properties = [
+      {
+        attributeName: "aVertexPosition",
+        size: 2,
+        uploadFunction: this.uploadVertices,
+        offset: 0
+      },
+      {
+        attributeName: "aPositionCoord",
+        size: 2,
+        uploadFunction: this.uploadPosition,
+        offset: 0
+      },
+      {
+        attributeName: "aRotation",
+        size: 1,
+        uploadFunction: this.uploadRotation,
+        offset: 0
+      },
+      {
+        attributeName: "aTextureCoord",
+        size: 2,
+        uploadFunction: this.uploadUvs,
+        offset: 0
+      },
+      {
+        attributeName: "aColor",
+        size: 1,
+        type: TYPES.UNSIGNED_BYTE,
+        uploadFunction: this.uploadTint,
+        offset: 0
+      }
+    ];
+    this.shader = Shader.from(vertex, fragment, {});
+    this.state = State.for2d();
+  }
+  render(container) {
+    const children = container.children;
+    const maxSize = container._maxSize;
+    const batchSize = container._batchSize;
+    const renderer = this.renderer;
+    let totalChildren = children.length;
+    if (totalChildren === 0) {
+      return;
+    } else if (totalChildren > maxSize && !container.autoResize) {
+      totalChildren = maxSize;
+    }
+    let buffers = container._buffers;
+    if (!buffers) {
+      buffers = container._buffers = this.generateBuffers(container);
+    }
+    const baseTexture = children[0]._texture.baseTexture;
+    const premultiplied = baseTexture.alphaMode > 0;
+    this.state.blendMode = correctBlendMode(container.blendMode, premultiplied);
+    renderer.state.set(this.state);
+    const gl = renderer.gl;
+    const m = container.worldTransform.copyTo(this.tempMatrix);
+    m.prepend(renderer.globalUniforms.uniforms.projectionMatrix);
+    this.shader.uniforms.translationMatrix = m.toArray(true);
+    this.shader.uniforms.uColor = Color.shared.setValue(container.tintRgb).premultiply(container.worldAlpha, premultiplied).toArray(this.shader.uniforms.uColor);
+    this.shader.uniforms.uSampler = baseTexture;
+    this.renderer.shader.bind(this.shader);
+    let updateStatic = false;
+    for (let i = 0, j = 0; i < totalChildren; i += batchSize, j += 1) {
+      let amount = totalChildren - i;
+      if (amount > batchSize) {
+        amount = batchSize;
+      }
+      if (j >= buffers.length) {
+        buffers.push(this._generateOneMoreBuffer(container));
+      }
+      const buffer = buffers[j];
+      buffer.uploadDynamic(children, i, amount);
+      const bid = container._bufferUpdateIDs[j] || 0;
+      updateStatic = updateStatic || buffer._updateID < bid;
+      if (updateStatic) {
+        buffer._updateID = container._updateID;
+        buffer.uploadStatic(children, i, amount);
+      }
+      renderer.geometry.bind(buffer.geometry);
+      gl.drawElements(gl.TRIANGLES, amount * 6, gl.UNSIGNED_SHORT, 0);
+    }
+  }
+  generateBuffers(container) {
+    const buffers = [];
+    const size = container._maxSize;
+    const batchSize = container._batchSize;
+    const dynamicPropertyFlags = container._properties;
+    for (let i = 0; i < size; i += batchSize) {
+      buffers.push(new ParticleBuffer(this.properties, dynamicPropertyFlags, batchSize));
+    }
+    return buffers;
+  }
+  _generateOneMoreBuffer(container) {
+    const batchSize = container._batchSize;
+    const dynamicPropertyFlags = container._properties;
+    return new ParticleBuffer(this.properties, dynamicPropertyFlags, batchSize);
+  }
+  uploadVertices(children, startIndex, amount, array, stride, offset) {
+    let w0 = 0;
+    let w1 = 0;
+    let h0 = 0;
+    let h1 = 0;
+    for (let i = 0; i < amount; ++i) {
+      const sprite = children[startIndex + i];
+      const texture = sprite._texture;
+      const sx = sprite.scale.x;
+      const sy = sprite.scale.y;
+      const trim = texture.trim;
+      const orig = texture.orig;
+      if (trim) {
+        w1 = trim.x - sprite.anchor.x * orig.width;
+        w0 = w1 + trim.width;
+        h1 = trim.y - sprite.anchor.y * orig.height;
+        h0 = h1 + trim.height;
+      } else {
+        w0 = orig.width * (1 - sprite.anchor.x);
+        w1 = orig.width * -sprite.anchor.x;
+        h0 = orig.height * (1 - sprite.anchor.y);
+        h1 = orig.height * -sprite.anchor.y;
+      }
+      array[offset] = w1 * sx;
+      array[offset + 1] = h1 * sy;
+      array[offset + stride] = w0 * sx;
+      array[offset + stride + 1] = h1 * sy;
+      array[offset + stride * 2] = w0 * sx;
+      array[offset + stride * 2 + 1] = h0 * sy;
+      array[offset + stride * 3] = w1 * sx;
+      array[offset + stride * 3 + 1] = h0 * sy;
+      offset += stride * 4;
+    }
+  }
+  uploadPosition(children, startIndex, amount, array, stride, offset) {
+    for (let i = 0; i < amount; i++) {
+      const spritePosition = children[startIndex + i].position;
+      array[offset] = spritePosition.x;
+      array[offset + 1] = spritePosition.y;
+      array[offset + stride] = spritePosition.x;
+      array[offset + stride + 1] = spritePosition.y;
+      array[offset + stride * 2] = spritePosition.x;
+      array[offset + stride * 2 + 1] = spritePosition.y;
+      array[offset + stride * 3] = spritePosition.x;
+      array[offset + stride * 3 + 1] = spritePosition.y;
+      offset += stride * 4;
+    }
+  }
+  uploadRotation(children, startIndex, amount, array, stride, offset) {
+    for (let i = 0; i < amount; i++) {
+      const spriteRotation = children[startIndex + i].rotation;
+      array[offset] = spriteRotation;
+      array[offset + stride] = spriteRotation;
+      array[offset + stride * 2] = spriteRotation;
+      array[offset + stride * 3] = spriteRotation;
+      offset += stride * 4;
+    }
+  }
+  uploadUvs(children, startIndex, amount, array, stride, offset) {
+    for (let i = 0; i < amount; ++i) {
+      const textureUvs = children[startIndex + i]._texture._uvs;
+      if (textureUvs) {
+        array[offset] = textureUvs.x0;
+        array[offset + 1] = textureUvs.y0;
+        array[offset + stride] = textureUvs.x1;
+        array[offset + stride + 1] = textureUvs.y1;
+        array[offset + stride * 2] = textureUvs.x2;
+        array[offset + stride * 2 + 1] = textureUvs.y2;
+        array[offset + stride * 3] = textureUvs.x3;
+        array[offset + stride * 3 + 1] = textureUvs.y3;
+        offset += stride * 4;
+      } else {
+        array[offset] = 0;
+        array[offset + 1] = 0;
+        array[offset + stride] = 0;
+        array[offset + stride + 1] = 0;
+        array[offset + stride * 2] = 0;
+        array[offset + stride * 2 + 1] = 0;
+        array[offset + stride * 3] = 0;
+        array[offset + stride * 3 + 1] = 0;
+        offset += stride * 4;
+      }
+    }
+  }
+  uploadTint(children, startIndex, amount, array, stride, offset) {
+    for (let i = 0; i < amount; ++i) {
+      const sprite = children[startIndex + i];
+      const result = Color.shared.setValue(sprite._tintRGB).toPremultiplied(sprite.alpha, sprite.texture.baseTexture.alphaMode > 0);
+      array[offset] = result;
+      array[offset + stride] = result;
+      array[offset + stride * 2] = result;
+      array[offset + stride * 3] = result;
+      offset += stride * 4;
+    }
+  }
+  destroy() {
+    super.destroy();
+    if (this.shader) {
+      this.shader.destroy();
+      this.shader = null;
+    }
+    this.tempMatrix = null;
+  }
+}
+ParticleRenderer.extension = {
+  name: "particle",
+  type: ExtensionType.RendererPlugin
+};
+extensions$1.add(ParticleRenderer);
+
+var TEXT_GRADIENT = /* @__PURE__ */ ((TEXT_GRADIENT2) => {
+  TEXT_GRADIENT2[TEXT_GRADIENT2["LINEAR_VERTICAL"] = 0] = "LINEAR_VERTICAL";
+  TEXT_GRADIENT2[TEXT_GRADIENT2["LINEAR_HORIZONTAL"] = 1] = "LINEAR_HORIZONTAL";
+  return TEXT_GRADIENT2;
+})(TEXT_GRADIENT || {});
+
+const contextSettings = {
+  willReadFrequently: true
+};
+const _TextMetrics = class {
+  static get experimentalLetterSpacingSupported() {
+    let result = _TextMetrics._experimentalLetterSpacingSupported;
+    if (result !== void 0) {
+      const proto = settings.ADAPTER.getCanvasRenderingContext2D().prototype;
+      result = _TextMetrics._experimentalLetterSpacingSupported = "letterSpacing" in proto || "textLetterSpacing" in proto;
+    }
+    return result;
+  }
+  constructor(text, style, width, height, lines, lineWidths, lineHeight, maxLineWidth, fontProperties) {
+    this.text = text;
+    this.style = style;
+    this.width = width;
+    this.height = height;
+    this.lines = lines;
+    this.lineWidths = lineWidths;
+    this.lineHeight = lineHeight;
+    this.maxLineWidth = maxLineWidth;
+    this.fontProperties = fontProperties;
+  }
+  static measureText(text, style, wordWrap, canvas = _TextMetrics._canvas) {
+    wordWrap = wordWrap === void 0 || wordWrap === null ? style.wordWrap : wordWrap;
+    const font = style.toFontString();
+    const fontProperties = _TextMetrics.measureFont(font);
+    if (fontProperties.fontSize === 0) {
+      fontProperties.fontSize = style.fontSize;
+      fontProperties.ascent = style.fontSize;
+    }
+    const context = canvas.getContext("2d", contextSettings);
+    context.font = font;
+    const outputText = wordWrap ? _TextMetrics.wordWrap(text, style, canvas) : text;
+    const lines = outputText.split(/(?:\r\n|\r|\n)/);
+    const lineWidths = new Array(lines.length);
+    let maxLineWidth = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const lineWidth = _TextMetrics._measureText(lines[i], style.letterSpacing, context);
+      lineWidths[i] = lineWidth;
+      maxLineWidth = Math.max(maxLineWidth, lineWidth);
+    }
+    let width = maxLineWidth + style.strokeThickness;
+    if (style.dropShadow) {
+      width += style.dropShadowDistance;
+    }
+    const lineHeight = style.lineHeight || fontProperties.fontSize + style.strokeThickness;
+    let height = Math.max(lineHeight, fontProperties.fontSize + style.strokeThickness * 2) + (lines.length - 1) * (lineHeight + style.leading);
+    if (style.dropShadow) {
+      height += style.dropShadowDistance;
+    }
+    return new _TextMetrics(text, style, width, height, lines, lineWidths, lineHeight + style.leading, maxLineWidth, fontProperties);
+  }
+  static _measureText(text, letterSpacing, context) {
+    let useExperimentalLetterSpacing = false;
+    if (_TextMetrics.experimentalLetterSpacingSupported) {
+      if (_TextMetrics.experimentalLetterSpacing) {
+        context.letterSpacing = `${letterSpacing}px`;
+        context.textLetterSpacing = `${letterSpacing}px`;
+        useExperimentalLetterSpacing = true;
+      } else {
+        context.letterSpacing = "0px";
+        context.textLetterSpacing = "0px";
+      }
+    }
+    let width = context.measureText(text).width;
+    if (width > 0) {
+      if (useExperimentalLetterSpacing) {
+        width -= letterSpacing;
+      } else {
+        width += (_TextMetrics.graphemeSegmenter(text).length - 1) * letterSpacing;
+      }
+    }
+    return width;
+  }
+  static wordWrap(text, style, canvas = _TextMetrics._canvas) {
+    const context = canvas.getContext("2d", contextSettings);
+    let width = 0;
+    let line = "";
+    let lines = "";
+    const cache = /* @__PURE__ */ Object.create(null);
+    const { letterSpacing, whiteSpace } = style;
+    const collapseSpaces = _TextMetrics.collapseSpaces(whiteSpace);
+    const collapseNewlines = _TextMetrics.collapseNewlines(whiteSpace);
+    let canPrependSpaces = !collapseSpaces;
+    const wordWrapWidth = style.wordWrapWidth + letterSpacing;
+    const tokens = _TextMetrics.tokenize(text);
+    for (let i = 0; i < tokens.length; i++) {
+      let token = tokens[i];
+      if (_TextMetrics.isNewline(token)) {
+        if (!collapseNewlines) {
+          lines += _TextMetrics.addLine(line);
+          canPrependSpaces = !collapseSpaces;
+          line = "";
+          width = 0;
+          continue;
+        }
+        token = " ";
+      }
+      if (collapseSpaces) {
+        const currIsBreakingSpace = _TextMetrics.isBreakingSpace(token);
+        const lastIsBreakingSpace = _TextMetrics.isBreakingSpace(line[line.length - 1]);
+        if (currIsBreakingSpace && lastIsBreakingSpace) {
+          continue;
+        }
+      }
+      const tokenWidth = _TextMetrics.getFromCache(token, letterSpacing, cache, context);
+      if (tokenWidth > wordWrapWidth) {
+        if (line !== "") {
+          lines += _TextMetrics.addLine(line);
+          line = "";
+          width = 0;
+        }
+        if (_TextMetrics.canBreakWords(token, style.breakWords)) {
+          const characters = _TextMetrics.wordWrapSplit(token);
+          for (let j = 0; j < characters.length; j++) {
+            let char = characters[j];
+            let lastChar = char;
+            let k = 1;
+            while (characters[j + k]) {
+              const nextChar = characters[j + k];
+              if (!_TextMetrics.canBreakChars(lastChar, nextChar, token, j, style.breakWords)) {
+                char += nextChar;
+              } else {
+                break;
+              }
+              lastChar = nextChar;
+              k++;
+            }
+            j += k - 1;
+            const characterWidth = _TextMetrics.getFromCache(char, letterSpacing, cache, context);
+            if (characterWidth + width > wordWrapWidth) {
+              lines += _TextMetrics.addLine(line);
+              canPrependSpaces = false;
+              line = "";
+              width = 0;
+            }
+            line += char;
+            width += characterWidth;
+          }
+        } else {
+          if (line.length > 0) {
+            lines += _TextMetrics.addLine(line);
+            line = "";
+            width = 0;
+          }
+          const isLastToken = i === tokens.length - 1;
+          lines += _TextMetrics.addLine(token, !isLastToken);
+          canPrependSpaces = false;
+          line = "";
+          width = 0;
+        }
+      } else {
+        if (tokenWidth + width > wordWrapWidth) {
+          canPrependSpaces = false;
+          lines += _TextMetrics.addLine(line);
+          line = "";
+          width = 0;
+        }
+        if (line.length > 0 || !_TextMetrics.isBreakingSpace(token) || canPrependSpaces) {
+          line += token;
+          width += tokenWidth;
+        }
+      }
+    }
+    lines += _TextMetrics.addLine(line, false);
+    return lines;
+  }
+  static addLine(line, newLine = true) {
+    line = _TextMetrics.trimRight(line);
+    line = newLine ? `${line}
+` : line;
+    return line;
+  }
+  static getFromCache(key, letterSpacing, cache, context) {
+    let width = cache[key];
+    if (typeof width !== "number") {
+      width = _TextMetrics._measureText(key, letterSpacing, context) + letterSpacing;
+      cache[key] = width;
+    }
+    return width;
+  }
+  static collapseSpaces(whiteSpace) {
+    return whiteSpace === "normal" || whiteSpace === "pre-line";
+  }
+  static collapseNewlines(whiteSpace) {
+    return whiteSpace === "normal";
+  }
+  static trimRight(text) {
+    if (typeof text !== "string") {
+      return "";
+    }
+    for (let i = text.length - 1; i >= 0; i--) {
+      const char = text[i];
+      if (!_TextMetrics.isBreakingSpace(char)) {
+        break;
+      }
+      text = text.slice(0, -1);
+    }
+    return text;
+  }
+  static isNewline(char) {
+    if (typeof char !== "string") {
+      return false;
+    }
+    return _TextMetrics._newlines.includes(char.charCodeAt(0));
+  }
+  static isBreakingSpace(char, _nextChar) {
+    if (typeof char !== "string") {
+      return false;
+    }
+    return _TextMetrics._breakingSpaces.includes(char.charCodeAt(0));
+  }
+  static tokenize(text) {
+    const tokens = [];
+    let token = "";
+    if (typeof text !== "string") {
+      return tokens;
+    }
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      const nextChar = text[i + 1];
+      if (_TextMetrics.isBreakingSpace(char, nextChar) || _TextMetrics.isNewline(char)) {
+        if (token !== "") {
+          tokens.push(token);
+          token = "";
+        }
+        tokens.push(char);
+        continue;
+      }
+      token += char;
+    }
+    if (token !== "") {
+      tokens.push(token);
+    }
+    return tokens;
+  }
+  static canBreakWords(_token, breakWords) {
+    return breakWords;
+  }
+  static canBreakChars(_char, _nextChar, _token, _index, _breakWords) {
+    return true;
+  }
+  static wordWrapSplit(token) {
+    return _TextMetrics.graphemeSegmenter(token);
+  }
+  static measureFont(font) {
+    if (_TextMetrics._fonts[font]) {
+      return _TextMetrics._fonts[font];
+    }
+    const properties = {
+      ascent: 0,
+      descent: 0,
+      fontSize: 0
+    };
+    const canvas = _TextMetrics._canvas;
+    const context = _TextMetrics._context;
+    context.font = font;
+    const metricsString = _TextMetrics.METRICS_STRING + _TextMetrics.BASELINE_SYMBOL;
+    const width = Math.ceil(context.measureText(metricsString).width);
+    let baseline = Math.ceil(context.measureText(_TextMetrics.BASELINE_SYMBOL).width);
+    const height = Math.ceil(_TextMetrics.HEIGHT_MULTIPLIER * baseline);
+    baseline = baseline * _TextMetrics.BASELINE_MULTIPLIER | 0;
+    if (width === 0 || height === 0) {
+      _TextMetrics._fonts[font] = properties;
+      return properties;
+    }
+    canvas.width = width;
+    canvas.height = height;
+    context.fillStyle = "#f00";
+    context.fillRect(0, 0, width, height);
+    context.font = font;
+    context.textBaseline = "alphabetic";
+    context.fillStyle = "#000";
+    context.fillText(metricsString, 0, baseline);
+    const imagedata = context.getImageData(0, 0, width, height).data;
+    const pixels = imagedata.length;
+    const line = width * 4;
+    let i = 0;
+    let idx = 0;
+    let stop = false;
+    for (i = 0; i < baseline; ++i) {
+      for (let j = 0; j < line; j += 4) {
+        if (imagedata[idx + j] !== 255) {
+          stop = true;
+          break;
+        }
+      }
+      if (!stop) {
+        idx += line;
+      } else {
+        break;
+      }
+    }
+    properties.ascent = baseline - i;
+    idx = pixels - line;
+    stop = false;
+    for (i = height; i > baseline; --i) {
+      for (let j = 0; j < line; j += 4) {
+        if (imagedata[idx + j] !== 255) {
+          stop = true;
+          break;
+        }
+      }
+      if (!stop) {
+        idx -= line;
+      } else {
+        break;
+      }
+    }
+    properties.descent = i - baseline;
+    properties.fontSize = properties.ascent + properties.descent;
+    _TextMetrics._fonts[font] = properties;
+    return properties;
+  }
+  static clearMetrics(font = "") {
+    if (font) {
+      delete _TextMetrics._fonts[font];
+    } else {
+      _TextMetrics._fonts = {};
+    }
+  }
+  static get _canvas() {
+    if (!_TextMetrics.__canvas) {
+      let canvas;
+      try {
+        const c = new OffscreenCanvas(0, 0);
+        const context = c.getContext("2d", contextSettings);
+        if (context?.measureText) {
+          _TextMetrics.__canvas = c;
+          return c;
+        }
+        canvas = settings.ADAPTER.createCanvas();
+      } catch (ex) {
+        canvas = settings.ADAPTER.createCanvas();
+      }
+      canvas.width = canvas.height = 10;
+      _TextMetrics.__canvas = canvas;
+    }
+    return _TextMetrics.__canvas;
+  }
+  static get _context() {
+    if (!_TextMetrics.__context) {
+      _TextMetrics.__context = _TextMetrics._canvas.getContext("2d", contextSettings);
+    }
+    return _TextMetrics.__context;
+  }
+};
+let TextMetrics = _TextMetrics;
+TextMetrics.METRICS_STRING = "|\xC9q\xC5";
+TextMetrics.BASELINE_SYMBOL = "M";
+TextMetrics.BASELINE_MULTIPLIER = 1.4;
+TextMetrics.HEIGHT_MULTIPLIER = 2;
+TextMetrics.graphemeSegmenter = (() => {
+  if (typeof Intl?.Segmenter === "function") {
+    const segmenter = new Intl.Segmenter();
+    return (s) => [...segmenter.segment(s)].map((x) => x.segment);
+  }
+  return (s) => [...s];
+})();
+TextMetrics.experimentalLetterSpacing = false;
+TextMetrics._fonts = {};
+TextMetrics._newlines = [
+  10,
+  13
+];
+TextMetrics._breakingSpaces = [
+  9,
+  32,
+  8192,
+  8193,
+  8194,
+  8195,
+  8196,
+  8197,
+  8198,
+  8200,
+  8201,
+  8202,
+  8287,
+  12288
+];
+
+const genericFontFamilies = [
+  "serif",
+  "sans-serif",
+  "monospace",
+  "cursive",
+  "fantasy",
+  "system-ui"
+];
+const _TextStyle = class {
+  constructor(style) {
+    this.styleID = 0;
+    this.reset();
+    deepCopyProperties(this, style, style);
+  }
+  clone() {
+    const clonedProperties = {};
+    deepCopyProperties(clonedProperties, this, _TextStyle.defaultStyle);
+    return new _TextStyle(clonedProperties);
+  }
+  reset() {
+    deepCopyProperties(this, _TextStyle.defaultStyle, _TextStyle.defaultStyle);
+  }
+  get align() {
+    return this._align;
+  }
+  set align(align) {
+    if (this._align !== align) {
+      this._align = align;
+      this.styleID++;
+    }
+  }
+  get breakWords() {
+    return this._breakWords;
+  }
+  set breakWords(breakWords) {
+    if (this._breakWords !== breakWords) {
+      this._breakWords = breakWords;
+      this.styleID++;
+    }
+  }
+  get dropShadow() {
+    return this._dropShadow;
+  }
+  set dropShadow(dropShadow) {
+    if (this._dropShadow !== dropShadow) {
+      this._dropShadow = dropShadow;
+      this.styleID++;
+    }
+  }
+  get dropShadowAlpha() {
+    return this._dropShadowAlpha;
+  }
+  set dropShadowAlpha(dropShadowAlpha) {
+    if (this._dropShadowAlpha !== dropShadowAlpha) {
+      this._dropShadowAlpha = dropShadowAlpha;
+      this.styleID++;
+    }
+  }
+  get dropShadowAngle() {
+    return this._dropShadowAngle;
+  }
+  set dropShadowAngle(dropShadowAngle) {
+    if (this._dropShadowAngle !== dropShadowAngle) {
+      this._dropShadowAngle = dropShadowAngle;
+      this.styleID++;
+    }
+  }
+  get dropShadowBlur() {
+    return this._dropShadowBlur;
+  }
+  set dropShadowBlur(dropShadowBlur) {
+    if (this._dropShadowBlur !== dropShadowBlur) {
+      this._dropShadowBlur = dropShadowBlur;
+      this.styleID++;
+    }
+  }
+  get dropShadowColor() {
+    return this._dropShadowColor;
+  }
+  set dropShadowColor(dropShadowColor) {
+    const outputColor = getColor(dropShadowColor);
+    if (this._dropShadowColor !== outputColor) {
+      this._dropShadowColor = outputColor;
+      this.styleID++;
+    }
+  }
+  get dropShadowDistance() {
+    return this._dropShadowDistance;
+  }
+  set dropShadowDistance(dropShadowDistance) {
+    if (this._dropShadowDistance !== dropShadowDistance) {
+      this._dropShadowDistance = dropShadowDistance;
+      this.styleID++;
+    }
+  }
+  get fill() {
+    return this._fill;
+  }
+  set fill(fill) {
+    const outputColor = getColor(fill);
+    if (this._fill !== outputColor) {
+      this._fill = outputColor;
+      this.styleID++;
+    }
+  }
+  get fillGradientType() {
+    return this._fillGradientType;
+  }
+  set fillGradientType(fillGradientType) {
+    if (this._fillGradientType !== fillGradientType) {
+      this._fillGradientType = fillGradientType;
+      this.styleID++;
+    }
+  }
+  get fillGradientStops() {
+    return this._fillGradientStops;
+  }
+  set fillGradientStops(fillGradientStops) {
+    if (!areArraysEqual(this._fillGradientStops, fillGradientStops)) {
+      this._fillGradientStops = fillGradientStops;
+      this.styleID++;
+    }
+  }
+  get fontFamily() {
+    return this._fontFamily;
+  }
+  set fontFamily(fontFamily) {
+    if (this.fontFamily !== fontFamily) {
+      this._fontFamily = fontFamily;
+      this.styleID++;
+    }
+  }
+  get fontSize() {
+    return this._fontSize;
+  }
+  set fontSize(fontSize) {
+    if (this._fontSize !== fontSize) {
+      this._fontSize = fontSize;
+      this.styleID++;
+    }
+  }
+  get fontStyle() {
+    return this._fontStyle;
+  }
+  set fontStyle(fontStyle) {
+    if (this._fontStyle !== fontStyle) {
+      this._fontStyle = fontStyle;
+      this.styleID++;
+    }
+  }
+  get fontVariant() {
+    return this._fontVariant;
+  }
+  set fontVariant(fontVariant) {
+    if (this._fontVariant !== fontVariant) {
+      this._fontVariant = fontVariant;
+      this.styleID++;
+    }
+  }
+  get fontWeight() {
+    return this._fontWeight;
+  }
+  set fontWeight(fontWeight) {
+    if (this._fontWeight !== fontWeight) {
+      this._fontWeight = fontWeight;
+      this.styleID++;
+    }
+  }
+  get letterSpacing() {
+    return this._letterSpacing;
+  }
+  set letterSpacing(letterSpacing) {
+    if (this._letterSpacing !== letterSpacing) {
+      this._letterSpacing = letterSpacing;
+      this.styleID++;
+    }
+  }
+  get lineHeight() {
+    return this._lineHeight;
+  }
+  set lineHeight(lineHeight) {
+    if (this._lineHeight !== lineHeight) {
+      this._lineHeight = lineHeight;
+      this.styleID++;
+    }
+  }
+  get leading() {
+    return this._leading;
+  }
+  set leading(leading) {
+    if (this._leading !== leading) {
+      this._leading = leading;
+      this.styleID++;
+    }
+  }
+  get lineJoin() {
+    return this._lineJoin;
+  }
+  set lineJoin(lineJoin) {
+    if (this._lineJoin !== lineJoin) {
+      this._lineJoin = lineJoin;
+      this.styleID++;
+    }
+  }
+  get miterLimit() {
+    return this._miterLimit;
+  }
+  set miterLimit(miterLimit) {
+    if (this._miterLimit !== miterLimit) {
+      this._miterLimit = miterLimit;
+      this.styleID++;
+    }
+  }
+  get padding() {
+    return this._padding;
+  }
+  set padding(padding) {
+    if (this._padding !== padding) {
+      this._padding = padding;
+      this.styleID++;
+    }
+  }
+  get stroke() {
+    return this._stroke;
+  }
+  set stroke(stroke) {
+    const outputColor = getColor(stroke);
+    if (this._stroke !== outputColor) {
+      this._stroke = outputColor;
+      this.styleID++;
+    }
+  }
+  get strokeThickness() {
+    return this._strokeThickness;
+  }
+  set strokeThickness(strokeThickness) {
+    if (this._strokeThickness !== strokeThickness) {
+      this._strokeThickness = strokeThickness;
+      this.styleID++;
+    }
+  }
+  get textBaseline() {
+    return this._textBaseline;
+  }
+  set textBaseline(textBaseline) {
+    if (this._textBaseline !== textBaseline) {
+      this._textBaseline = textBaseline;
+      this.styleID++;
+    }
+  }
+  get trim() {
+    return this._trim;
+  }
+  set trim(trim) {
+    if (this._trim !== trim) {
+      this._trim = trim;
+      this.styleID++;
+    }
+  }
+  get whiteSpace() {
+    return this._whiteSpace;
+  }
+  set whiteSpace(whiteSpace) {
+    if (this._whiteSpace !== whiteSpace) {
+      this._whiteSpace = whiteSpace;
+      this.styleID++;
+    }
+  }
+  get wordWrap() {
+    return this._wordWrap;
+  }
+  set wordWrap(wordWrap) {
+    if (this._wordWrap !== wordWrap) {
+      this._wordWrap = wordWrap;
+      this.styleID++;
+    }
+  }
+  get wordWrapWidth() {
+    return this._wordWrapWidth;
+  }
+  set wordWrapWidth(wordWrapWidth) {
+    if (this._wordWrapWidth !== wordWrapWidth) {
+      this._wordWrapWidth = wordWrapWidth;
+      this.styleID++;
+    }
+  }
+  toFontString() {
+    const fontSizeString = typeof this.fontSize === "number" ? `${this.fontSize}px` : this.fontSize;
+    let fontFamilies = this.fontFamily;
+    if (!Array.isArray(this.fontFamily)) {
+      fontFamilies = this.fontFamily.split(",");
+    }
+    for (let i = fontFamilies.length - 1; i >= 0; i--) {
+      let fontFamily = fontFamilies[i].trim();
+      if (!/([\"\'])[^\'\"]+\1/.test(fontFamily) && !genericFontFamilies.includes(fontFamily)) {
+        fontFamily = `"${fontFamily}"`;
+      }
+      fontFamilies[i] = fontFamily;
+    }
+    return `${this.fontStyle} ${this.fontVariant} ${this.fontWeight} ${fontSizeString} ${fontFamilies.join(",")}`;
+  }
+};
+let TextStyle = _TextStyle;
+TextStyle.defaultStyle = {
+  align: "left",
+  breakWords: false,
+  dropShadow: false,
+  dropShadowAlpha: 1,
+  dropShadowAngle: Math.PI / 6,
+  dropShadowBlur: 0,
+  dropShadowColor: "black",
+  dropShadowDistance: 5,
+  fill: "black",
+  fillGradientType: TEXT_GRADIENT.LINEAR_VERTICAL,
+  fillGradientStops: [],
+  fontFamily: "Arial",
+  fontSize: 26,
+  fontStyle: "normal",
+  fontVariant: "normal",
+  fontWeight: "normal",
+  leading: 0,
+  letterSpacing: 0,
+  lineHeight: 0,
+  lineJoin: "miter",
+  miterLimit: 10,
+  padding: 0,
+  stroke: "black",
+  strokeThickness: 0,
+  textBaseline: "alphabetic",
+  trim: false,
+  whiteSpace: "pre",
+  wordWrap: false,
+  wordWrapWidth: 100
+};
+function getColor(color) {
+  const temp = Color.shared;
+  if (!Array.isArray(color)) {
+    return temp.setValue(color).toHex();
+  } else {
+    return color.map((c) => temp.setValue(c).toHex());
+  }
+}
+function areArraysEqual(array1, array2) {
+  if (!Array.isArray(array1) || !Array.isArray(array2)) {
+    return false;
+  }
+  if (array1.length !== array2.length) {
+    return false;
+  }
+  for (let i = 0; i < array1.length; ++i) {
+    if (array1[i] !== array2[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+function deepCopyProperties(target, source, propertyObj) {
+  for (const prop in propertyObj) {
+    if (Array.isArray(source[prop])) {
+      target[prop] = source[prop].slice();
+    } else {
+      target[prop] = source[prop];
+    }
+  }
+}
+
+const defaultDestroyOptions = {
+  texture: true,
+  children: false,
+  baseTexture: true
+};
+const _Text = class extends Sprite {
+  constructor(text, style, canvas) {
+    let ownCanvas = false;
+    if (!canvas) {
+      canvas = settings.ADAPTER.createCanvas();
+      ownCanvas = true;
+    }
+    canvas.width = 3;
+    canvas.height = 3;
+    const texture = Texture.from(canvas);
+    texture.orig = new Rectangle();
+    texture.trim = new Rectangle();
+    super(texture);
+    this._ownCanvas = ownCanvas;
+    this.canvas = canvas;
+    this.context = canvas.getContext("2d", {
+      willReadFrequently: true
+    });
+    this._resolution = _Text.defaultResolution ?? settings.RESOLUTION;
+    this._autoResolution = _Text.defaultAutoResolution;
+    this._text = null;
+    this._style = null;
+    this._styleListener = null;
+    this._font = "";
+    this.text = text;
+    this.style = style;
+    this.localStyleID = -1;
+  }
+  static get experimentalLetterSpacing() {
+    return TextMetrics.experimentalLetterSpacing;
+  }
+  static set experimentalLetterSpacing(value) {
+    deprecation("7.1.0", "Text.experimentalLetterSpacing is deprecated, use TextMetrics.experimentalLetterSpacing");
+    TextMetrics.experimentalLetterSpacing = value;
+  }
+  updateText(respectDirty) {
+    const style = this._style;
+    if (this.localStyleID !== style.styleID) {
+      this.dirty = true;
+      this.localStyleID = style.styleID;
+    }
+    if (!this.dirty && respectDirty) {
+      return;
+    }
+    this._font = this._style.toFontString();
+    const context = this.context;
+    const measured = TextMetrics.measureText(this._text || " ", this._style, this._style.wordWrap, this.canvas);
+    const width = measured.width;
+    const height = measured.height;
+    const lines = measured.lines;
+    const lineHeight = measured.lineHeight;
+    const lineWidths = measured.lineWidths;
+    const maxLineWidth = measured.maxLineWidth;
+    const fontProperties = measured.fontProperties;
+    this.canvas.width = Math.ceil(Math.ceil(Math.max(1, width) + style.padding * 2) * this._resolution);
+    this.canvas.height = Math.ceil(Math.ceil(Math.max(1, height) + style.padding * 2) * this._resolution);
+    context.scale(this._resolution, this._resolution);
+    context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    context.font = this._font;
+    context.lineWidth = style.strokeThickness;
+    context.textBaseline = style.textBaseline;
+    context.lineJoin = style.lineJoin;
+    context.miterLimit = style.miterLimit;
+    let linePositionX;
+    let linePositionY;
+    const passesCount = style.dropShadow ? 2 : 1;
+    for (let i = 0; i < passesCount; ++i) {
+      const isShadowPass = style.dropShadow && i === 0;
+      const dsOffsetText = isShadowPass ? Math.ceil(Math.max(1, height) + style.padding * 2) : 0;
+      const dsOffsetShadow = dsOffsetText * this._resolution;
+      if (isShadowPass) {
+        context.fillStyle = "black";
+        context.strokeStyle = "black";
+        const dropShadowColor = style.dropShadowColor;
+        const dropShadowBlur = style.dropShadowBlur * this._resolution;
+        const dropShadowDistance = style.dropShadowDistance * this._resolution;
+        context.shadowColor = Color.shared.setValue(dropShadowColor).setAlpha(style.dropShadowAlpha).toRgbaString();
+        context.shadowBlur = dropShadowBlur;
+        context.shadowOffsetX = Math.cos(style.dropShadowAngle) * dropShadowDistance;
+        context.shadowOffsetY = Math.sin(style.dropShadowAngle) * dropShadowDistance + dsOffsetShadow;
+      } else {
+        context.fillStyle = this._generateFillStyle(style, lines, measured);
+        context.strokeStyle = style.stroke;
+        context.shadowColor = "black";
+        context.shadowBlur = 0;
+        context.shadowOffsetX = 0;
+        context.shadowOffsetY = 0;
+      }
+      let linePositionYShift = (lineHeight - fontProperties.fontSize) / 2;
+      if (lineHeight - fontProperties.fontSize < 0) {
+        linePositionYShift = 0;
+      }
+      for (let i2 = 0; i2 < lines.length; i2++) {
+        linePositionX = style.strokeThickness / 2;
+        linePositionY = style.strokeThickness / 2 + i2 * lineHeight + fontProperties.ascent + linePositionYShift;
+        if (style.align === "right") {
+          linePositionX += maxLineWidth - lineWidths[i2];
+        } else if (style.align === "center") {
+          linePositionX += (maxLineWidth - lineWidths[i2]) / 2;
+        }
+        if (style.stroke && style.strokeThickness) {
+          this.drawLetterSpacing(lines[i2], linePositionX + style.padding, linePositionY + style.padding - dsOffsetText, true);
+        }
+        if (style.fill) {
+          this.drawLetterSpacing(lines[i2], linePositionX + style.padding, linePositionY + style.padding - dsOffsetText);
+        }
+      }
+    }
+    this.updateTexture();
+  }
+  drawLetterSpacing(text, x, y, isStroke = false) {
+    const style = this._style;
+    const letterSpacing = style.letterSpacing;
+    let useExperimentalLetterSpacing = false;
+    if (TextMetrics.experimentalLetterSpacingSupported) {
+      if (TextMetrics.experimentalLetterSpacing) {
+        this.context.letterSpacing = `${letterSpacing}px`;
+        this.context.textLetterSpacing = `${letterSpacing}px`;
+        useExperimentalLetterSpacing = true;
+      } else {
+        this.context.letterSpacing = "0px";
+        this.context.textLetterSpacing = "0px";
+      }
+    }
+    if (letterSpacing === 0 || useExperimentalLetterSpacing) {
+      if (isStroke) {
+        this.context.strokeText(text, x, y);
+      } else {
+        this.context.fillText(text, x, y);
+      }
+      return;
+    }
+    let currentPosition = x;
+    const stringArray = TextMetrics.graphemeSegmenter(text);
+    let previousWidth = this.context.measureText(text).width;
+    let currentWidth = 0;
+    for (let i = 0; i < stringArray.length; ++i) {
+      const currentChar = stringArray[i];
+      if (isStroke) {
+        this.context.strokeText(currentChar, currentPosition, y);
+      } else {
+        this.context.fillText(currentChar, currentPosition, y);
+      }
+      let textStr = "";
+      for (let j = i + 1; j < stringArray.length; ++j) {
+        textStr += stringArray[j];
+      }
+      currentWidth = this.context.measureText(textStr).width;
+      currentPosition += previousWidth - currentWidth + letterSpacing;
+      previousWidth = currentWidth;
+    }
+  }
+  updateTexture() {
+    const canvas = this.canvas;
+    if (this._style.trim) {
+      const trimmed = trimCanvas(canvas);
+      if (trimmed.data) {
+        canvas.width = trimmed.width;
+        canvas.height = trimmed.height;
+        this.context.putImageData(trimmed.data, 0, 0);
+      }
+    }
+    const texture = this._texture;
+    const style = this._style;
+    const padding = style.trim ? 0 : style.padding;
+    const baseTexture = texture.baseTexture;
+    texture.trim.width = texture._frame.width = canvas.width / this._resolution;
+    texture.trim.height = texture._frame.height = canvas.height / this._resolution;
+    texture.trim.x = -padding;
+    texture.trim.y = -padding;
+    texture.orig.width = texture._frame.width - padding * 2;
+    texture.orig.height = texture._frame.height - padding * 2;
+    this._onTextureUpdate();
+    baseTexture.setRealSize(canvas.width, canvas.height, this._resolution);
+    texture.updateUvs();
+    this.dirty = false;
+  }
+  _render(renderer) {
+    if (this._autoResolution && this._resolution !== renderer.resolution) {
+      this._resolution = renderer.resolution;
+      this.dirty = true;
+    }
+    this.updateText(true);
+    super._render(renderer);
+  }
+  updateTransform() {
+    this.updateText(true);
+    super.updateTransform();
+  }
+  getBounds(skipUpdate, rect) {
+    this.updateText(true);
+    if (this._textureID === -1) {
+      skipUpdate = false;
+    }
+    return super.getBounds(skipUpdate, rect);
+  }
+  getLocalBounds(rect) {
+    this.updateText(true);
+    return super.getLocalBounds.call(this, rect);
+  }
+  _calculateBounds() {
+    this.calculateVertices();
+    this._bounds.addQuad(this.vertexData);
+  }
+  _generateFillStyle(style, lines, metrics) {
+    const fillStyle = style.fill;
+    if (!Array.isArray(fillStyle)) {
+      return fillStyle;
+    } else if (fillStyle.length === 1) {
+      return fillStyle[0];
+    }
+    let gradient;
+    const dropShadowCorrection = style.dropShadow ? style.dropShadowDistance : 0;
+    const padding = style.padding || 0;
+    const width = this.canvas.width / this._resolution - dropShadowCorrection - padding * 2;
+    const height = this.canvas.height / this._resolution - dropShadowCorrection - padding * 2;
+    const fill = fillStyle.slice();
+    const fillGradientStops = style.fillGradientStops.slice();
+    if (!fillGradientStops.length) {
+      const lengthPlus1 = fill.length + 1;
+      for (let i = 1; i < lengthPlus1; ++i) {
+        fillGradientStops.push(i / lengthPlus1);
+      }
+    }
+    fill.unshift(fillStyle[0]);
+    fillGradientStops.unshift(0);
+    fill.push(fillStyle[fillStyle.length - 1]);
+    fillGradientStops.push(1);
+    if (style.fillGradientType === TEXT_GRADIENT.LINEAR_VERTICAL) {
+      gradient = this.context.createLinearGradient(width / 2, padding, width / 2, height + padding);
+      const textHeight = metrics.fontProperties.fontSize + style.strokeThickness;
+      for (let i = 0; i < lines.length; i++) {
+        const lastLineBottom = metrics.lineHeight * (i - 1) + textHeight;
+        const thisLineTop = metrics.lineHeight * i;
+        let thisLineGradientStart = thisLineTop;
+        if (i > 0 && lastLineBottom > thisLineTop) {
+          thisLineGradientStart = (thisLineTop + lastLineBottom) / 2;
+        }
+        const thisLineBottom = thisLineTop + textHeight;
+        const nextLineTop = metrics.lineHeight * (i + 1);
+        let thisLineGradientEnd = thisLineBottom;
+        if (i + 1 < lines.length && nextLineTop < thisLineBottom) {
+          thisLineGradientEnd = (thisLineBottom + nextLineTop) / 2;
+        }
+        const gradStopLineHeight = (thisLineGradientEnd - thisLineGradientStart) / height;
+        for (let j = 0; j < fill.length; j++) {
+          let lineStop = 0;
+          if (typeof fillGradientStops[j] === "number") {
+            lineStop = fillGradientStops[j];
+          } else {
+            lineStop = j / fill.length;
+          }
+          let globalStop = Math.min(1, Math.max(0, thisLineGradientStart / height + lineStop * gradStopLineHeight));
+          globalStop = Number(globalStop.toFixed(5));
+          gradient.addColorStop(globalStop, fill[j]);
+        }
+      }
+    } else {
+      gradient = this.context.createLinearGradient(padding, height / 2, width + padding, height / 2);
+      const totalIterations = fill.length + 1;
+      let currentIteration = 1;
+      for (let i = 0; i < fill.length; i++) {
+        let stop;
+        if (typeof fillGradientStops[i] === "number") {
+          stop = fillGradientStops[i];
+        } else {
+          stop = currentIteration / totalIterations;
+        }
+        gradient.addColorStop(stop, fill[i]);
+        currentIteration++;
+      }
+    }
+    return gradient;
+  }
+  destroy(options) {
+    if (typeof options === "boolean") {
+      options = { children: options };
+    }
+    options = Object.assign({}, defaultDestroyOptions, options);
+    super.destroy(options);
+    if (this._ownCanvas) {
+      this.canvas.height = this.canvas.width = 0;
+    }
+    this.context = null;
+    this.canvas = null;
+    this._style = null;
+  }
+  get width() {
+    this.updateText(true);
+    return Math.abs(this.scale.x) * this._texture.orig.width;
+  }
+  set width(value) {
+    this.updateText(true);
+    const s = sign(this.scale.x) || 1;
+    this.scale.x = s * value / this._texture.orig.width;
+    this._width = value;
+  }
+  get height() {
+    this.updateText(true);
+    return Math.abs(this.scale.y) * this._texture.orig.height;
+  }
+  set height(value) {
+    this.updateText(true);
+    const s = sign(this.scale.y) || 1;
+    this.scale.y = s * value / this._texture.orig.height;
+    this._height = value;
+  }
+  get style() {
+    return this._style;
+  }
+  set style(style) {
+    style = style || {};
+    if (style instanceof TextStyle) {
+      this._style = style;
+    } else {
+      this._style = new TextStyle(style);
+    }
+    this.localStyleID = -1;
+    this.dirty = true;
+  }
+  get text() {
+    return this._text;
+  }
+  set text(text) {
+    text = String(text === null || text === void 0 ? "" : text);
+    if (this._text === text) {
+      return;
+    }
+    this._text = text;
+    this.dirty = true;
+  }
+  get resolution() {
+    return this._resolution;
+  }
+  set resolution(value) {
+    this._autoResolution = false;
+    if (this._resolution === value) {
+      return;
+    }
+    this._resolution = value;
+    this.dirty = true;
+  }
+};
+let Text = _Text;
+Text.defaultAutoResolution = true;
+
+class CountLimiter {
+  constructor(maxItemsPerFrame) {
+    this.maxItemsPerFrame = maxItemsPerFrame;
+    this.itemsLeft = 0;
+  }
+  beginFrame() {
+    this.itemsLeft = this.maxItemsPerFrame;
+  }
+  allowedToUpload() {
+    return this.itemsLeft-- > 0;
+  }
+}
+
+function findMultipleBaseTextures(item, queue) {
+  let result = false;
+  if (item?._textures?.length) {
+    for (let i = 0; i < item._textures.length; i++) {
+      if (item._textures[i] instanceof Texture) {
+        const baseTexture = item._textures[i].baseTexture;
+        if (!queue.includes(baseTexture)) {
+          queue.push(baseTexture);
+          result = true;
+        }
+      }
+    }
+  }
+  return result;
+}
+function findBaseTexture(item, queue) {
+  if (item.baseTexture instanceof BaseTexture) {
+    const texture = item.baseTexture;
+    if (!queue.includes(texture)) {
+      queue.push(texture);
+    }
+    return true;
+  }
+  return false;
+}
+function findTexture(item, queue) {
+  if (item._texture && item._texture instanceof Texture) {
+    const texture = item._texture.baseTexture;
+    if (!queue.includes(texture)) {
+      queue.push(texture);
+    }
+    return true;
+  }
+  return false;
+}
+function drawText(_helper, item) {
+  if (item instanceof Text) {
+    item.updateText(true);
+    return true;
+  }
+  return false;
+}
+function calculateTextStyle(_helper, item) {
+  if (item instanceof TextStyle) {
+    const font = item.toFontString();
+    TextMetrics.measureFont(font);
+    return true;
+  }
+  return false;
+}
+function findText(item, queue) {
+  if (item instanceof Text) {
+    if (!queue.includes(item.style)) {
+      queue.push(item.style);
+    }
+    if (!queue.includes(item)) {
+      queue.push(item);
+    }
+    const texture = item._texture.baseTexture;
+    if (!queue.includes(texture)) {
+      queue.push(texture);
+    }
+    return true;
+  }
+  return false;
+}
+function findTextStyle(item, queue) {
+  if (item instanceof TextStyle) {
+    if (!queue.includes(item)) {
+      queue.push(item);
+    }
+    return true;
+  }
+  return false;
+}
+const _BasePrepare = class {
+  constructor(renderer) {
+    this.limiter = new CountLimiter(_BasePrepare.uploadsPerFrame);
+    this.renderer = renderer;
+    this.uploadHookHelper = null;
+    this.queue = [];
+    this.addHooks = [];
+    this.uploadHooks = [];
+    this.completes = [];
+    this.ticking = false;
+    this.delayedTick = () => {
+      if (!this.queue) {
+        return;
+      }
+      this.prepareItems();
+    };
+    this.registerFindHook(findText);
+    this.registerFindHook(findTextStyle);
+    this.registerFindHook(findMultipleBaseTextures);
+    this.registerFindHook(findBaseTexture);
+    this.registerFindHook(findTexture);
+    this.registerUploadHook(drawText);
+    this.registerUploadHook(calculateTextStyle);
+  }
+  upload(item) {
+    return new Promise((resolve) => {
+      if (item) {
+        this.add(item);
+      }
+      if (this.queue.length) {
+        this.completes.push(resolve);
+        if (!this.ticking) {
+          this.ticking = true;
+          Ticker.system.addOnce(this.tick, this, UPDATE_PRIORITY.UTILITY);
+        }
+      } else {
+        resolve();
+      }
+    });
+  }
+  tick() {
+    setTimeout(this.delayedTick, 0);
+  }
+  prepareItems() {
+    this.limiter.beginFrame();
+    while (this.queue.length && this.limiter.allowedToUpload()) {
+      const item = this.queue[0];
+      let uploaded = false;
+      if (item && !item._destroyed) {
+        for (let i = 0, len = this.uploadHooks.length; i < len; i++) {
+          if (this.uploadHooks[i](this.uploadHookHelper, item)) {
+            this.queue.shift();
+            uploaded = true;
+            break;
+          }
+        }
+      }
+      if (!uploaded) {
+        this.queue.shift();
+      }
+    }
+    if (!this.queue.length) {
+      this.ticking = false;
+      const completes = this.completes.slice(0);
+      this.completes.length = 0;
+      for (let i = 0, len = completes.length; i < len; i++) {
+        completes[i]();
+      }
+    } else {
+      Ticker.system.addOnce(this.tick, this, UPDATE_PRIORITY.UTILITY);
+    }
+  }
+  registerFindHook(addHook) {
+    if (addHook) {
+      this.addHooks.push(addHook);
+    }
+    return this;
+  }
+  registerUploadHook(uploadHook) {
+    if (uploadHook) {
+      this.uploadHooks.push(uploadHook);
+    }
+    return this;
+  }
+  add(item) {
+    for (let i = 0, len = this.addHooks.length; i < len; i++) {
+      if (this.addHooks[i](item, this.queue)) {
+        break;
+      }
+    }
+    if (item instanceof Container) {
+      for (let i = item.children.length - 1; i >= 0; i--) {
+        this.add(item.children[i]);
+      }
+    }
+    return this;
+  }
+  destroy() {
+    if (this.ticking) {
+      Ticker.system.remove(this.tick, this);
+    }
+    this.ticking = false;
+    this.addHooks = null;
+    this.uploadHooks = null;
+    this.renderer = null;
+    this.completes = null;
+    this.queue = null;
+    this.limiter = null;
+    this.uploadHookHelper = null;
+  }
+};
+let BasePrepare = _BasePrepare;
+BasePrepare.uploadsPerFrame = 4;
+
+Object.defineProperties(settings, {
+  UPLOADS_PER_FRAME: {
+    get() {
+      return BasePrepare.uploadsPerFrame;
+    },
+    set(value) {
+      deprecation("7.1.0", "settings.UPLOADS_PER_FRAME is deprecated, use prepare.BasePrepare.uploadsPerFrame");
+      BasePrepare.uploadsPerFrame = value;
+    }
+  }
+});
+
+function uploadBaseTextures(renderer, item) {
+  if (item instanceof BaseTexture) {
+    if (!item._glTextures[renderer.CONTEXT_UID]) {
+      renderer.texture.bind(item);
+    }
+    return true;
+  }
+  return false;
+}
+function uploadGraphics(renderer, item) {
+  if (!(item instanceof Graphics)) {
+    return false;
+  }
+  const { geometry } = item;
+  item.finishPoly();
+  geometry.updateBatches();
+  const { batches } = geometry;
+  for (let i = 0; i < batches.length; i++) {
+    const { texture } = batches[i].style;
+    if (texture) {
+      uploadBaseTextures(renderer, texture.baseTexture);
+    }
+  }
+  if (!geometry.batchable) {
+    renderer.geometry.bind(geometry, item._resolveDirectShader(renderer));
+  }
+  return true;
+}
+function findGraphics(item, queue) {
+  if (item instanceof Graphics) {
+    queue.push(item);
+    return true;
+  }
+  return false;
+}
+class Prepare extends BasePrepare {
+  constructor(renderer) {
+    super(renderer);
+    this.uploadHookHelper = this.renderer;
+    this.registerFindHook(findGraphics);
+    this.registerUploadHook(uploadBaseTextures);
+    this.registerUploadHook(uploadGraphics);
+  }
+}
+Prepare.extension = {
+  name: "prepare",
+  type: ExtensionType.RendererSystem
+};
+extensions$1.add(Prepare);
+
+var gl2FragmentSrc = "#version 300 es\n#define SHADER_NAME Tiling-Sprite-100\n\nprecision lowp float;\n\nin vec2 vTextureCoord;\n\nout vec4 fragmentColor;\n\nuniform sampler2D uSampler;\nuniform vec4 uColor;\nuniform mat3 uMapCoord;\nuniform vec4 uClampFrame;\nuniform vec2 uClampOffset;\n\nvoid main(void)\n{\n    vec2 coord = vTextureCoord + ceil(uClampOffset - vTextureCoord);\n    coord = (uMapCoord * vec3(coord, 1.0)).xy;\n    vec2 unclamped = coord;\n    coord = clamp(coord, uClampFrame.xy, uClampFrame.zw);\n\n    vec4 texSample = texture(uSampler, coord, unclamped == coord ? 0.0f : -32.0f);// lod-bias very negative to force lod 0\n\n    fragmentColor = texSample * uColor;\n}\n";
+
+var gl2VertexSrc = "#version 300 es\n#define SHADER_NAME Tiling-Sprite-300\n\nprecision lowp float;\n\nin vec2 aVertexPosition;\nin vec2 aTextureCoord;\n\nuniform mat3 projectionMatrix;\nuniform mat3 translationMatrix;\nuniform mat3 uTransform;\n\nout vec2 vTextureCoord;\n\nvoid main(void)\n{\n    gl_Position = vec4((projectionMatrix * translationMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);\n\n    vTextureCoord = (uTransform * vec3(aTextureCoord, 1.0)).xy;\n}\n";
+
+var gl1FragmentSrc = "#version 100\n#ifdef GL_EXT_shader_texture_lod\n    #extension GL_EXT_shader_texture_lod : enable\n#endif\n#define SHADER_NAME Tiling-Sprite-100\n\nprecision lowp float;\n\nvarying vec2 vTextureCoord;\n\nuniform sampler2D uSampler;\nuniform vec4 uColor;\nuniform mat3 uMapCoord;\nuniform vec4 uClampFrame;\nuniform vec2 uClampOffset;\n\nvoid main(void)\n{\n    vec2 coord = vTextureCoord + ceil(uClampOffset - vTextureCoord);\n    coord = (uMapCoord * vec3(coord, 1.0)).xy;\n    vec2 unclamped = coord;\n    coord = clamp(coord, uClampFrame.xy, uClampFrame.zw);\n\n    #ifdef GL_EXT_shader_texture_lod\n        vec4 texSample = unclamped == coord\n            ? texture2D(uSampler, coord) \n            : texture2DLodEXT(uSampler, coord, 0);\n    #else\n        vec4 texSample = texture2D(uSampler, coord);\n    #endif\n\n    gl_FragColor = texSample * uColor;\n}\n";
+
+var gl1VertexSrc = "#version 100\n#define SHADER_NAME Tiling-Sprite-100\n\nprecision lowp float;\n\nattribute vec2 aVertexPosition;\nattribute vec2 aTextureCoord;\n\nuniform mat3 projectionMatrix;\nuniform mat3 translationMatrix;\nuniform mat3 uTransform;\n\nvarying vec2 vTextureCoord;\n\nvoid main(void)\n{\n    gl_Position = vec4((projectionMatrix * translationMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);\n\n    vTextureCoord = (uTransform * vec3(aTextureCoord, 1.0)).xy;\n}\n";
+
+var fragmentSimpleSrc = "#version 100\n#define SHADER_NAME Tiling-Sprite-Simple-100\n\nprecision lowp float;\n\nvarying vec2 vTextureCoord;\n\nuniform sampler2D uSampler;\nuniform vec4 uColor;\n\nvoid main(void)\n{\n    vec4 texSample = texture2D(uSampler, vTextureCoord);\n    gl_FragColor = texSample * uColor;\n}\n";
+
+const tempMat = new Matrix();
+class TilingSpriteRenderer extends ObjectRenderer {
+  constructor(renderer) {
+    super(renderer);
+    renderer.runners.contextChange.add(this);
+    this.quad = new QuadUv();
+    this.state = State.for2d();
+  }
+  contextChange() {
+    const renderer = this.renderer;
+    const uniforms = { globals: renderer.globalUniforms };
+    this.simpleShader = Shader.from(gl1VertexSrc, fragmentSimpleSrc, uniforms);
+    this.shader = renderer.context.webGLVersion > 1 ? Shader.from(gl2VertexSrc, gl2FragmentSrc, uniforms) : Shader.from(gl1VertexSrc, gl1FragmentSrc, uniforms);
+  }
+  render(ts) {
+    const renderer = this.renderer;
+    const quad = this.quad;
+    let vertices = quad.vertices;
+    vertices[0] = vertices[6] = ts._width * -ts.anchor.x;
+    vertices[1] = vertices[3] = ts._height * -ts.anchor.y;
+    vertices[2] = vertices[4] = ts._width * (1 - ts.anchor.x);
+    vertices[5] = vertices[7] = ts._height * (1 - ts.anchor.y);
+    const anchorX = ts.uvRespectAnchor ? ts.anchor.x : 0;
+    const anchorY = ts.uvRespectAnchor ? ts.anchor.y : 0;
+    vertices = quad.uvs;
+    vertices[0] = vertices[6] = -anchorX;
+    vertices[1] = vertices[3] = -anchorY;
+    vertices[2] = vertices[4] = 1 - anchorX;
+    vertices[5] = vertices[7] = 1 - anchorY;
+    quad.invalidate();
+    const tex = ts._texture;
+    const baseTex = tex.baseTexture;
+    const premultiplied = baseTex.alphaMode > 0;
+    const lt = ts.tileTransform.localTransform;
+    const uv = ts.uvMatrix;
+    let isSimple = baseTex.isPowerOfTwo && tex.frame.width === baseTex.width && tex.frame.height === baseTex.height;
+    if (isSimple) {
+      if (!baseTex._glTextures[renderer.CONTEXT_UID]) {
+        if (baseTex.wrapMode === WRAP_MODES.CLAMP) {
+          baseTex.wrapMode = WRAP_MODES.REPEAT;
+        }
+      } else {
+        isSimple = baseTex.wrapMode !== WRAP_MODES.CLAMP;
+      }
+    }
+    const shader = isSimple ? this.simpleShader : this.shader;
+    const w = tex.width;
+    const h = tex.height;
+    const W = ts._width;
+    const H = ts._height;
+    tempMat.set(lt.a * w / W, lt.b * w / H, lt.c * h / W, lt.d * h / H, lt.tx / W, lt.ty / H);
+    tempMat.invert();
+    if (isSimple) {
+      tempMat.prepend(uv.mapCoord);
+    } else {
+      shader.uniforms.uMapCoord = uv.mapCoord.toArray(true);
+      shader.uniforms.uClampFrame = uv.uClampFrame;
+      shader.uniforms.uClampOffset = uv.uClampOffset;
+    }
+    shader.uniforms.uTransform = tempMat.toArray(true);
+    shader.uniforms.uColor = Color.shared.setValue(ts.tint).premultiply(ts.worldAlpha, premultiplied).toArray(shader.uniforms.uColor);
+    shader.uniforms.translationMatrix = ts.transform.worldTransform.toArray(true);
+    shader.uniforms.uSampler = tex;
+    renderer.shader.bind(shader);
+    renderer.geometry.bind(quad);
+    this.state.blendMode = correctBlendMode(ts.blendMode, premultiplied);
+    renderer.state.set(this.state);
+    renderer.geometry.draw(this.renderer.gl.TRIANGLES, 6, 0);
+  }
+}
+TilingSpriteRenderer.extension = {
+  name: "tilingSprite",
+  type: ExtensionType.RendererPlugin
+};
+extensions$1.add(TilingSpriteRenderer);
+
+const _Spritesheet = class {
+  constructor(texture, data, resolutionFilename = null) {
+    this.linkedSheets = [];
+    this._texture = texture instanceof Texture ? texture : null;
+    this.baseTexture = texture instanceof BaseTexture ? texture : this._texture.baseTexture;
+    this.textures = {};
+    this.animations = {};
+    this.data = data;
+    const resource = this.baseTexture.resource;
+    this.resolution = this._updateResolution(resolutionFilename || (resource ? resource.url : null));
+    this._frames = this.data.frames;
+    this._frameKeys = Object.keys(this._frames);
+    this._batchIndex = 0;
+    this._callback = null;
+  }
+  _updateResolution(resolutionFilename = null) {
+    const { scale } = this.data.meta;
+    let resolution = getResolutionOfUrl(resolutionFilename, null);
+    if (resolution === null) {
+      resolution = parseFloat(scale ?? "1");
+    }
+    if (resolution !== 1) {
+      this.baseTexture.setResolution(resolution);
+    }
+    return resolution;
+  }
+  parse() {
+    return new Promise((resolve) => {
+      this._callback = resolve;
+      this._batchIndex = 0;
+      if (this._frameKeys.length <= _Spritesheet.BATCH_SIZE) {
+        this._processFrames(0);
+        this._processAnimations();
+        this._parseComplete();
+      } else {
+        this._nextBatch();
+      }
+    });
+  }
+  _processFrames(initialFrameIndex) {
+    let frameIndex = initialFrameIndex;
+    const maxFrames = _Spritesheet.BATCH_SIZE;
+    while (frameIndex - initialFrameIndex < maxFrames && frameIndex < this._frameKeys.length) {
+      const i = this._frameKeys[frameIndex];
+      const data = this._frames[i];
+      const rect = data.frame;
+      if (rect) {
+        let frame = null;
+        let trim = null;
+        const sourceSize = data.trimmed !== false && data.sourceSize ? data.sourceSize : data.frame;
+        const orig = new Rectangle(0, 0, Math.floor(sourceSize.w) / this.resolution, Math.floor(sourceSize.h) / this.resolution);
+        if (data.rotated) {
+          frame = new Rectangle(Math.floor(rect.x) / this.resolution, Math.floor(rect.y) / this.resolution, Math.floor(rect.h) / this.resolution, Math.floor(rect.w) / this.resolution);
+        } else {
+          frame = new Rectangle(Math.floor(rect.x) / this.resolution, Math.floor(rect.y) / this.resolution, Math.floor(rect.w) / this.resolution, Math.floor(rect.h) / this.resolution);
+        }
+        if (data.trimmed !== false && data.spriteSourceSize) {
+          trim = new Rectangle(Math.floor(data.spriteSourceSize.x) / this.resolution, Math.floor(data.spriteSourceSize.y) / this.resolution, Math.floor(rect.w) / this.resolution, Math.floor(rect.h) / this.resolution);
+        }
+        this.textures[i] = new Texture(this.baseTexture, frame, orig, trim, data.rotated ? 2 : 0, data.anchor, data.borders);
+        Texture.addToCache(this.textures[i], i);
+      }
+      frameIndex++;
+    }
+  }
+  _processAnimations() {
+    const animations = this.data.animations || {};
+    for (const animName in animations) {
+      this.animations[animName] = [];
+      for (let i = 0; i < animations[animName].length; i++) {
+        const frameName = animations[animName][i];
+        this.animations[animName].push(this.textures[frameName]);
+      }
+    }
+  }
+  _parseComplete() {
+    const callback = this._callback;
+    this._callback = null;
+    this._batchIndex = 0;
+    callback.call(this, this.textures);
+  }
+  _nextBatch() {
+    this._processFrames(this._batchIndex * _Spritesheet.BATCH_SIZE);
+    this._batchIndex++;
+    setTimeout(() => {
+      if (this._batchIndex * _Spritesheet.BATCH_SIZE < this._frameKeys.length) {
+        this._nextBatch();
+      } else {
+        this._processAnimations();
+        this._parseComplete();
+      }
+    }, 0);
+  }
+  destroy(destroyBase = false) {
+    for (const i in this.textures) {
+      this.textures[i].destroy();
+    }
+    this._frames = null;
+    this._frameKeys = null;
+    this.data = null;
+    this.textures = null;
+    if (destroyBase) {
+      this._texture?.destroy();
+      this.baseTexture.destroy();
+    }
+    this._texture = null;
+    this.baseTexture = null;
+    this.linkedSheets = [];
+  }
+};
+let Spritesheet = _Spritesheet;
+Spritesheet.BATCH_SIZE = 1e3;
+
+const validImages = ["jpg", "png", "jpeg", "avif", "webp"];
+function getCacheableAssets(keys, asset, ignoreMultiPack) {
+  const out = {};
+  keys.forEach((key) => {
+    out[key] = asset;
+  });
+  Object.keys(asset.textures).forEach((key) => {
+    out[key] = asset.textures[key];
+  });
+  if (!ignoreMultiPack) {
+    const basePath = path.dirname(keys[0]);
+    asset.linkedSheets.forEach((item, i) => {
+      const out2 = getCacheableAssets([`${basePath}/${asset.data.meta.related_multi_packs[i]}`], item, true);
+      Object.assign(out, out2);
+    });
+  }
+  return out;
+}
+const spritesheetAsset = {
+  extension: ExtensionType.Asset,
+  cache: {
+    test: (asset) => asset instanceof Spritesheet,
+    getCacheableAssets: (keys, asset) => getCacheableAssets(keys, asset, false)
+  },
+  resolver: {
+    test: (value) => {
+      const tempURL = value.split("?")[0];
+      const split = tempURL.split(".");
+      const extension = split.pop();
+      const format = split.pop();
+      return extension === "json" && validImages.includes(format);
+    },
+    parse: (value) => {
+      const split = value.split(".");
+      return {
+        resolution: parseFloat(settings.RETINA_PREFIX.exec(value)?.[1] ?? "1"),
+        format: split[split.length - 2],
+        src: value
+      };
+    }
+  },
+  loader: {
+    name: "spritesheetLoader",
+    extension: {
+      type: ExtensionType.LoadParser,
+      priority: LoaderParserPriority.Normal
+    },
+    async testParse(asset, options) {
+      return path.extname(options.src).toLowerCase() === ".json" && !!asset.frames;
+    },
+    async parse(asset, options, loader) {
+      let basePath = path.dirname(options.src);
+      if (basePath && basePath.lastIndexOf("/") !== basePath.length - 1) {
+        basePath += "/";
+      }
+      let imagePath = basePath + asset.meta.image;
+      imagePath = copySearchParams(imagePath, options.src);
+      const assets = await loader.load([imagePath]);
+      const texture = assets[imagePath];
+      const spritesheet = new Spritesheet(texture.baseTexture, asset, options.src);
+      await spritesheet.parse();
+      const multiPacks = asset?.meta?.related_multi_packs;
+      if (Array.isArray(multiPacks)) {
+        const promises = [];
+        for (const item of multiPacks) {
+          if (typeof item !== "string") {
+            continue;
+          }
+          let itemUrl = basePath + item;
+          if (options.data?.ignoreMultiPack) {
+            continue;
+          }
+          itemUrl = copySearchParams(itemUrl, options.src);
+          promises.push(loader.load({
+            src: itemUrl,
+            data: {
+              ignoreMultiPack: true
+            }
+          }));
+        }
+        const res = await Promise.all(promises);
+        spritesheet.linkedSheets = res;
+        res.forEach((item) => {
+          item.linkedSheets = [spritesheet].concat(spritesheet.linkedSheets.filter((sp) => sp !== item));
+        });
+      }
+      return spritesheet;
+    },
+    unload(spritesheet) {
+      spritesheet.destroy(true);
+    }
+  }
+};
+extensions$1.add(spritesheetAsset);
+
+class BitmapFontData {
+  constructor() {
+    this.info = [];
+    this.common = [];
+    this.page = [];
+    this.char = [];
+    this.kerning = [];
+    this.distanceField = [];
+  }
+}
+
+class TextFormat {
+  static test(data) {
+    return typeof data === "string" && data.startsWith("info face=");
+  }
+  static parse(txt) {
+    const items = txt.match(/^[a-z]+\s+.+$/gm);
+    const rawData = {
+      info: [],
+      common: [],
+      page: [],
+      char: [],
+      chars: [],
+      kerning: [],
+      kernings: [],
+      distanceField: []
+    };
+    for (const i in items) {
+      const name = items[i].match(/^[a-z]+/gm)[0];
+      const attributeList = items[i].match(/[a-zA-Z]+=([^\s"']+|"([^"]*)")/gm);
+      const itemData = {};
+      for (const i2 in attributeList) {
+        const split = attributeList[i2].split("=");
+        const key = split[0];
+        const strValue = split[1].replace(/"/gm, "");
+        const floatValue = parseFloat(strValue);
+        const value = isNaN(floatValue) ? strValue : floatValue;
+        itemData[key] = value;
+      }
+      rawData[name].push(itemData);
+    }
+    const font = new BitmapFontData();
+    rawData.info.forEach((info) => font.info.push({
+      face: info.face,
+      size: parseInt(info.size, 10)
+    }));
+    rawData.common.forEach((common) => font.common.push({
+      lineHeight: parseInt(common.lineHeight, 10)
+    }));
+    rawData.page.forEach((page) => font.page.push({
+      id: parseInt(page.id, 10),
+      file: page.file
+    }));
+    rawData.char.forEach((char) => font.char.push({
+      id: parseInt(char.id, 10),
+      page: parseInt(char.page, 10),
+      x: parseInt(char.x, 10),
+      y: parseInt(char.y, 10),
+      width: parseInt(char.width, 10),
+      height: parseInt(char.height, 10),
+      xoffset: parseInt(char.xoffset, 10),
+      yoffset: parseInt(char.yoffset, 10),
+      xadvance: parseInt(char.xadvance, 10)
+    }));
+    rawData.kerning.forEach((kerning) => font.kerning.push({
+      first: parseInt(kerning.first, 10),
+      second: parseInt(kerning.second, 10),
+      amount: parseInt(kerning.amount, 10)
+    }));
+    rawData.distanceField.forEach((df) => font.distanceField.push({
+      distanceRange: parseInt(df.distanceRange, 10),
+      fieldType: df.fieldType
+    }));
+    return font;
+  }
+}
+
+class XMLFormat {
+  static test(data) {
+    const xml = data;
+    return "getElementsByTagName" in xml && xml.getElementsByTagName("page").length && xml.getElementsByTagName("info")[0].getAttribute("face") !== null;
+  }
+  static parse(xml) {
+    const data = new BitmapFontData();
+    const info = xml.getElementsByTagName("info");
+    const common = xml.getElementsByTagName("common");
+    const page = xml.getElementsByTagName("page");
+    const char = xml.getElementsByTagName("char");
+    const kerning = xml.getElementsByTagName("kerning");
+    const distanceField = xml.getElementsByTagName("distanceField");
+    for (let i = 0; i < info.length; i++) {
+      data.info.push({
+        face: info[i].getAttribute("face"),
+        size: parseInt(info[i].getAttribute("size"), 10)
+      });
+    }
+    for (let i = 0; i < common.length; i++) {
+      data.common.push({
+        lineHeight: parseInt(common[i].getAttribute("lineHeight"), 10)
+      });
+    }
+    for (let i = 0; i < page.length; i++) {
+      data.page.push({
+        id: parseInt(page[i].getAttribute("id"), 10) || 0,
+        file: page[i].getAttribute("file")
+      });
+    }
+    for (let i = 0; i < char.length; i++) {
+      const letter = char[i];
+      data.char.push({
+        id: parseInt(letter.getAttribute("id"), 10),
+        page: parseInt(letter.getAttribute("page"), 10) || 0,
+        x: parseInt(letter.getAttribute("x"), 10),
+        y: parseInt(letter.getAttribute("y"), 10),
+        width: parseInt(letter.getAttribute("width"), 10),
+        height: parseInt(letter.getAttribute("height"), 10),
+        xoffset: parseInt(letter.getAttribute("xoffset"), 10),
+        yoffset: parseInt(letter.getAttribute("yoffset"), 10),
+        xadvance: parseInt(letter.getAttribute("xadvance"), 10)
+      });
+    }
+    for (let i = 0; i < kerning.length; i++) {
+      data.kerning.push({
+        first: parseInt(kerning[i].getAttribute("first"), 10),
+        second: parseInt(kerning[i].getAttribute("second"), 10),
+        amount: parseInt(kerning[i].getAttribute("amount"), 10)
+      });
+    }
+    for (let i = 0; i < distanceField.length; i++) {
+      data.distanceField.push({
+        fieldType: distanceField[i].getAttribute("fieldType"),
+        distanceRange: parseInt(distanceField[i].getAttribute("distanceRange"), 10)
+      });
+    }
+    return data;
+  }
+}
+
+class XMLStringFormat {
+  static test(data) {
+    if (typeof data === "string" && data.includes("<font>")) {
+      return XMLFormat.test(settings.ADAPTER.parseXML(data));
+    }
+    return false;
+  }
+  static parse(xmlTxt) {
+    return XMLFormat.parse(settings.ADAPTER.parseXML(xmlTxt));
+  }
+}
+
+const formats = [
+  TextFormat,
+  XMLFormat,
+  XMLStringFormat
+];
+function autoDetectFormat(data) {
+  for (let i = 0; i < formats.length; i++) {
+    if (formats[i].test(data)) {
+      return formats[i];
+    }
+  }
+  return null;
+}
+
+function generateFillStyle(canvas, context, style, resolution, lines, metrics) {
+  const fillStyle = style.fill;
+  if (!Array.isArray(fillStyle)) {
+    return fillStyle;
+  } else if (fillStyle.length === 1) {
+    return fillStyle[0];
+  }
+  let gradient;
+  const dropShadowCorrection = style.dropShadow ? style.dropShadowDistance : 0;
+  const padding = style.padding || 0;
+  const width = canvas.width / resolution - dropShadowCorrection - padding * 2;
+  const height = canvas.height / resolution - dropShadowCorrection - padding * 2;
+  const fill = fillStyle.slice();
+  const fillGradientStops = style.fillGradientStops.slice();
+  if (!fillGradientStops.length) {
+    const lengthPlus1 = fill.length + 1;
+    for (let i = 1; i < lengthPlus1; ++i) {
+      fillGradientStops.push(i / lengthPlus1);
+    }
+  }
+  fill.unshift(fillStyle[0]);
+  fillGradientStops.unshift(0);
+  fill.push(fillStyle[fillStyle.length - 1]);
+  fillGradientStops.push(1);
+  if (style.fillGradientType === TEXT_GRADIENT.LINEAR_VERTICAL) {
+    gradient = context.createLinearGradient(width / 2, padding, width / 2, height + padding);
+    let lastIterationStop = 0;
+    const textHeight = metrics.fontProperties.fontSize + style.strokeThickness;
+    const gradStopLineHeight = textHeight / height;
+    for (let i = 0; i < lines.length; i++) {
+      const thisLineTop = metrics.lineHeight * i;
+      for (let j = 0; j < fill.length; j++) {
+        let lineStop = 0;
+        if (typeof fillGradientStops[j] === "number") {
+          lineStop = fillGradientStops[j];
+        } else {
+          lineStop = j / fill.length;
+        }
+        const globalStop = thisLineTop / height + lineStop * gradStopLineHeight;
+        let clampedStop = Math.max(lastIterationStop, globalStop);
+        clampedStop = Math.min(clampedStop, 1);
+        gradient.addColorStop(clampedStop, fill[j]);
+        lastIterationStop = clampedStop;
+      }
+    }
+  } else {
+    gradient = context.createLinearGradient(padding, height / 2, width + padding, height / 2);
+    const totalIterations = fill.length + 1;
+    let currentIteration = 1;
+    for (let i = 0; i < fill.length; i++) {
+      let stop;
+      if (typeof fillGradientStops[i] === "number") {
+        stop = fillGradientStops[i];
+      } else {
+        stop = currentIteration / totalIterations;
+      }
+      gradient.addColorStop(stop, fill[i]);
+      currentIteration++;
+    }
+  }
+  return gradient;
+}
+
+function drawGlyph(canvas, context, metrics, x, y, resolution, style) {
+  const char = metrics.text;
+  const fontProperties = metrics.fontProperties;
+  context.translate(x, y);
+  context.scale(resolution, resolution);
+  const tx = style.strokeThickness / 2;
+  const ty = -(style.strokeThickness / 2);
+  context.font = style.toFontString();
+  context.lineWidth = style.strokeThickness;
+  context.textBaseline = style.textBaseline;
+  context.lineJoin = style.lineJoin;
+  context.miterLimit = style.miterLimit;
+  context.fillStyle = generateFillStyle(canvas, context, style, resolution, [char], metrics);
+  context.strokeStyle = style.stroke;
+  if (style.dropShadow) {
+    const dropShadowColor = style.dropShadowColor;
+    const dropShadowBlur = style.dropShadowBlur * resolution;
+    const dropShadowDistance = style.dropShadowDistance * resolution;
+    context.shadowColor = Color.shared.setValue(dropShadowColor).setAlpha(style.dropShadowAlpha).toRgbaString();
+    context.shadowBlur = dropShadowBlur;
+    context.shadowOffsetX = Math.cos(style.dropShadowAngle) * dropShadowDistance;
+    context.shadowOffsetY = Math.sin(style.dropShadowAngle) * dropShadowDistance;
+  } else {
+    context.shadowColor = "black";
+    context.shadowBlur = 0;
+    context.shadowOffsetX = 0;
+    context.shadowOffsetY = 0;
+  }
+  if (style.stroke && style.strokeThickness) {
+    context.strokeText(char, tx, ty + metrics.lineHeight - fontProperties.descent);
+  }
+  if (style.fill) {
+    context.fillText(char, tx, ty + metrics.lineHeight - fontProperties.descent);
+  }
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.fillStyle = "rgba(0, 0, 0, 0)";
+}
+
+function extractCharCode(str) {
+  return str.codePointAt ? str.codePointAt(0) : str.charCodeAt(0);
+}
+
+function splitTextToCharacters(text) {
+  return Array.from ? Array.from(text) : text.split("");
+}
+
+function resolveCharacters(chars) {
+  if (typeof chars === "string") {
+    chars = [chars];
+  }
+  const result = [];
+  for (let i = 0, j = chars.length; i < j; i++) {
+    const item = chars[i];
+    if (Array.isArray(item)) {
+      if (item.length !== 2) {
+        throw new Error(`[BitmapFont]: Invalid character range length, expecting 2 got ${item.length}.`);
+      }
+      const startCode = item[0].charCodeAt(0);
+      const endCode = item[1].charCodeAt(0);
+      if (endCode < startCode) {
+        throw new Error("[BitmapFont]: Invalid character range.");
+      }
+      for (let i2 = startCode, j2 = endCode; i2 <= j2; i2++) {
+        result.push(String.fromCharCode(i2));
+      }
+    } else {
+      result.push(...splitTextToCharacters(item));
+    }
+  }
+  if (result.length === 0) {
+    throw new Error("[BitmapFont]: Empty set when resolving characters.");
+  }
+  return result;
+}
+
+const _BitmapFont = class {
+  constructor(data, textures, ownsTextures) {
+    const [info] = data.info;
+    const [common] = data.common;
+    const [page] = data.page;
+    const [distanceField] = data.distanceField;
+    const res = getResolutionOfUrl(page.file);
+    const pageTextures = {};
+    this._ownsTextures = ownsTextures;
+    this.font = info.face;
+    this.size = info.size;
+    this.lineHeight = common.lineHeight / res;
+    this.chars = {};
+    this.pageTextures = pageTextures;
+    for (let i = 0; i < data.page.length; i++) {
+      const { id, file } = data.page[i];
+      pageTextures[id] = textures instanceof Array ? textures[i] : textures[file];
+      if (distanceField?.fieldType && distanceField.fieldType !== "none") {
+        pageTextures[id].baseTexture.alphaMode = ALPHA_MODES.NO_PREMULTIPLIED_ALPHA;
+        pageTextures[id].baseTexture.mipmap = MIPMAP_MODES.OFF;
+      }
+    }
+    for (let i = 0; i < data.char.length; i++) {
+      const { id, page: page2 } = data.char[i];
+      let { x, y, width, height, xoffset, yoffset, xadvance } = data.char[i];
+      x /= res;
+      y /= res;
+      width /= res;
+      height /= res;
+      xoffset /= res;
+      yoffset /= res;
+      xadvance /= res;
+      const rect = new Rectangle(x + pageTextures[page2].frame.x / res, y + pageTextures[page2].frame.y / res, width, height);
+      this.chars[id] = {
+        xOffset: xoffset,
+        yOffset: yoffset,
+        xAdvance: xadvance,
+        kerning: {},
+        texture: new Texture(pageTextures[page2].baseTexture, rect),
+        page: page2
+      };
+    }
+    for (let i = 0; i < data.kerning.length; i++) {
+      let { first, second, amount } = data.kerning[i];
+      first /= res;
+      second /= res;
+      amount /= res;
+      if (this.chars[second]) {
+        this.chars[second].kerning[first] = amount;
+      }
+    }
+    this.distanceFieldRange = distanceField?.distanceRange;
+    this.distanceFieldType = distanceField?.fieldType?.toLowerCase() ?? "none";
+  }
+  destroy() {
+    for (const id in this.chars) {
+      this.chars[id].texture.destroy();
+      this.chars[id].texture = null;
+    }
+    for (const id in this.pageTextures) {
+      if (this._ownsTextures) {
+        this.pageTextures[id].destroy(true);
+      }
+      this.pageTextures[id] = null;
+    }
+    this.chars = null;
+    this.pageTextures = null;
+  }
+  static install(data, textures, ownsTextures) {
+    let fontData;
+    if (data instanceof BitmapFontData) {
+      fontData = data;
+    } else {
+      const format = autoDetectFormat(data);
+      if (!format) {
+        throw new Error("Unrecognized data format for font.");
+      }
+      fontData = format.parse(data);
+    }
+    if (textures instanceof Texture) {
+      textures = [textures];
+    }
+    const font = new _BitmapFont(fontData, textures, ownsTextures);
+    _BitmapFont.available[font.font] = font;
+    return font;
+  }
+  static uninstall(name) {
+    const font = _BitmapFont.available[name];
+    if (!font) {
+      throw new Error(`No font found named '${name}'`);
+    }
+    font.destroy();
+    delete _BitmapFont.available[name];
+  }
+  static from(name, textStyle, options) {
+    if (!name) {
+      throw new Error("[BitmapFont] Property `name` is required.");
+    }
+    const {
+      chars,
+      padding,
+      resolution,
+      textureWidth,
+      textureHeight,
+      ...baseOptions
+    } = Object.assign({}, _BitmapFont.defaultOptions, options);
+    const charsList = resolveCharacters(chars);
+    const style = textStyle instanceof TextStyle ? textStyle : new TextStyle(textStyle);
+    const lineWidth = textureWidth;
+    const fontData = new BitmapFontData();
+    fontData.info[0] = {
+      face: style.fontFamily,
+      size: style.fontSize
+    };
+    fontData.common[0] = {
+      lineHeight: style.fontSize
+    };
+    let positionX = 0;
+    let positionY = 0;
+    let canvas;
+    let context;
+    let baseTexture;
+    let maxCharHeight = 0;
+    const textures = [];
+    for (let i = 0; i < charsList.length; i++) {
+      if (!canvas) {
+        canvas = settings.ADAPTER.createCanvas();
+        canvas.width = textureWidth;
+        canvas.height = textureHeight;
+        context = canvas.getContext("2d");
+        baseTexture = new BaseTexture(canvas, { resolution, ...baseOptions });
+        textures.push(new Texture(baseTexture));
+        fontData.page.push({
+          id: textures.length - 1,
+          file: ""
+        });
+      }
+      const character = charsList[i];
+      const metrics = TextMetrics.measureText(character, style, false, canvas);
+      const width = metrics.width;
+      const height = Math.ceil(metrics.height);
+      const textureGlyphWidth = Math.ceil((style.fontStyle === "italic" ? 2 : 1) * width);
+      if (positionY >= textureHeight - height * resolution) {
+        if (positionY === 0) {
+          throw new Error(`[BitmapFont] textureHeight ${textureHeight}px is too small (fontFamily: '${style.fontFamily}', fontSize: ${style.fontSize}px, char: '${character}')`);
+        }
+        --i;
+        canvas = null;
+        context = null;
+        baseTexture = null;
+        positionY = 0;
+        positionX = 0;
+        maxCharHeight = 0;
+        continue;
+      }
+      maxCharHeight = Math.max(height + metrics.fontProperties.descent, maxCharHeight);
+      if (textureGlyphWidth * resolution + positionX >= lineWidth) {
+        if (positionX === 0) {
+          throw new Error(`[BitmapFont] textureWidth ${textureWidth}px is too small (fontFamily: '${style.fontFamily}', fontSize: ${style.fontSize}px, char: '${character}')`);
+        }
+        --i;
+        positionY += maxCharHeight * resolution;
+        positionY = Math.ceil(positionY);
+        positionX = 0;
+        maxCharHeight = 0;
+        continue;
+      }
+      drawGlyph(canvas, context, metrics, positionX, positionY, resolution, style);
+      const id = extractCharCode(metrics.text);
+      fontData.char.push({
+        id,
+        page: textures.length - 1,
+        x: positionX / resolution,
+        y: positionY / resolution,
+        width: textureGlyphWidth,
+        height,
+        xoffset: 0,
+        yoffset: 0,
+        xadvance: width - (style.dropShadow ? style.dropShadowDistance : 0) - (style.stroke ? style.strokeThickness : 0)
+      });
+      positionX += (textureGlyphWidth + 2 * padding) * resolution;
+      positionX = Math.ceil(positionX);
+    }
+    for (let i = 0, len = charsList.length; i < len; i++) {
+      const first = charsList[i];
+      for (let j = 0; j < len; j++) {
+        const second = charsList[j];
+        const c1 = context.measureText(first).width;
+        const c2 = context.measureText(second).width;
+        const total = context.measureText(first + second).width;
+        const amount = total - (c1 + c2);
+        if (amount) {
+          fontData.kerning.push({
+            first: extractCharCode(first),
+            second: extractCharCode(second),
+            amount
+          });
+        }
+      }
+    }
+    const font = new _BitmapFont(fontData, textures, true);
+    if (_BitmapFont.available[name] !== void 0) {
+      _BitmapFont.uninstall(name);
+    }
+    _BitmapFont.available[name] = font;
+    return font;
+  }
+};
+let BitmapFont = _BitmapFont;
+BitmapFont.ALPHA = [["a", "z"], ["A", "Z"], " "];
+BitmapFont.NUMERIC = [["0", "9"]];
+BitmapFont.ALPHANUMERIC = [["a", "z"], ["A", "Z"], ["0", "9"], " "];
+BitmapFont.ASCII = [[" ", "~"]];
+BitmapFont.defaultOptions = {
+  resolution: 1,
+  textureWidth: 512,
+  textureHeight: 512,
+  padding: 4,
+  chars: _BitmapFont.ALPHANUMERIC
+};
+BitmapFont.available = {};
+
+var msdfFrag = "// Pixi texture info\r\nvarying vec2 vTextureCoord;\r\nuniform sampler2D uSampler;\r\n\r\n// Tint\r\nuniform vec4 uColor;\r\n\r\n// on 2D applications fwidth is screenScale / glyphAtlasScale * distanceFieldRange\r\nuniform float uFWidth;\r\n\r\nvoid main(void) {\r\n\r\n  // To stack MSDF and SDF we need a non-pre-multiplied-alpha texture.\r\n  vec4 texColor = texture2D(uSampler, vTextureCoord);\r\n\r\n  // MSDF\r\n  float median = texColor.r + texColor.g + texColor.b -\r\n                  min(texColor.r, min(texColor.g, texColor.b)) -\r\n                  max(texColor.r, max(texColor.g, texColor.b));\r\n  // SDF\r\n  median = min(median, texColor.a);\r\n\r\n  float screenPxDistance = uFWidth * (median - 0.5);\r\n  float alpha = clamp(screenPxDistance + 0.5, 0.0, 1.0);\r\n  if (median < 0.01) {\r\n    alpha = 0.0;\r\n  } else if (median > 0.99) {\r\n    alpha = 1.0;\r\n  }\r\n\r\n  // Gamma correction for coverage-like alpha\r\n  float luma = dot(uColor.rgb, vec3(0.299, 0.587, 0.114));\r\n  float gamma = mix(1.0, 1.0 / 2.2, luma);\r\n  float coverage = pow(uColor.a * alpha, gamma);  \r\n\r\n  // NPM Textures, NPM outputs\r\n  gl_FragColor = vec4(uColor.rgb, coverage);\r\n}\r\n";
+
+var msdfVert = "// Mesh material default fragment\r\nattribute vec2 aVertexPosition;\r\nattribute vec2 aTextureCoord;\r\n\r\nuniform mat3 projectionMatrix;\r\nuniform mat3 translationMatrix;\r\nuniform mat3 uTextureMatrix;\r\n\r\nvarying vec2 vTextureCoord;\r\n\r\nvoid main(void)\r\n{\r\n    gl_Position = vec4((projectionMatrix * translationMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);\r\n\r\n    vTextureCoord = (uTextureMatrix * vec3(aTextureCoord, 1.0)).xy;\r\n}\r\n";
+
+const pageMeshDataDefaultPageMeshData = [];
+const pageMeshDataMSDFPageMeshData = [];
+const charRenderDataPool = [];
+const _BitmapText = class extends Container {
+  constructor(text, style = {}) {
+    super();
+    const { align, tint, maxWidth, letterSpacing, fontName, fontSize } = Object.assign({}, _BitmapText.styleDefaults, style);
+    if (!BitmapFont.available[fontName]) {
+      throw new Error(`Missing BitmapFont "${fontName}"`);
+    }
+    this._activePagesMeshData = [];
+    this._textWidth = 0;
+    this._textHeight = 0;
+    this._align = align;
+    this._tintColor = new Color(tint);
+    this._font = void 0;
+    this._fontName = fontName;
+    this._fontSize = fontSize;
+    this.text = text;
+    this._maxWidth = maxWidth;
+    this._maxLineHeight = 0;
+    this._letterSpacing = letterSpacing;
+    this._anchor = new ObservablePoint(() => {
+      this.dirty = true;
+    }, this, 0, 0);
+    this._roundPixels = settings.ROUND_PIXELS;
+    this.dirty = true;
+    this._resolution = settings.RESOLUTION;
+    this._autoResolution = true;
+    this._textureCache = {};
+  }
+  updateText() {
+    const data = BitmapFont.available[this._fontName];
+    const fontSize = this.fontSize;
+    const scale = fontSize / data.size;
+    const pos = new Point();
+    const chars = [];
+    const lineWidths = [];
+    const lineSpaces = [];
+    const text = this._text.replace(/(?:\r\n|\r)/g, "\n") || " ";
+    const charsInput = splitTextToCharacters(text);
+    const maxWidth = this._maxWidth * data.size / fontSize;
+    const pageMeshDataPool = data.distanceFieldType === "none" ? pageMeshDataDefaultPageMeshData : pageMeshDataMSDFPageMeshData;
+    let prevCharCode = null;
+    let lastLineWidth = 0;
+    let maxLineWidth = 0;
+    let line = 0;
+    let lastBreakPos = -1;
+    let lastBreakWidth = 0;
+    let spacesRemoved = 0;
+    let maxLineHeight = 0;
+    let spaceCount = 0;
+    for (let i = 0; i < charsInput.length; i++) {
+      const char = charsInput[i];
+      const charCode = extractCharCode(char);
+      if (/(?:\s)/.test(char)) {
+        lastBreakPos = i;
+        lastBreakWidth = lastLineWidth;
+        spaceCount++;
+      }
+      if (char === "\r" || char === "\n") {
+        lineWidths.push(lastLineWidth);
+        lineSpaces.push(-1);
+        maxLineWidth = Math.max(maxLineWidth, lastLineWidth);
+        ++line;
+        ++spacesRemoved;
+        pos.x = 0;
+        pos.y += data.lineHeight;
+        prevCharCode = null;
+        spaceCount = 0;
+        continue;
+      }
+      const charData = data.chars[charCode];
+      if (!charData) {
+        continue;
+      }
+      if (prevCharCode && charData.kerning[prevCharCode]) {
+        pos.x += charData.kerning[prevCharCode];
+      }
+      const charRenderData = charRenderDataPool.pop() || {
+        texture: Texture.EMPTY,
+        line: 0,
+        charCode: 0,
+        prevSpaces: 0,
+        position: new Point()
+      };
+      charRenderData.texture = charData.texture;
+      charRenderData.line = line;
+      charRenderData.charCode = charCode;
+      charRenderData.position.x = Math.round(pos.x + charData.xOffset + this._letterSpacing / 2);
+      charRenderData.position.y = Math.round(pos.y + charData.yOffset);
+      charRenderData.prevSpaces = spaceCount;
+      chars.push(charRenderData);
+      lastLineWidth = charRenderData.position.x + Math.max(charData.xAdvance - charData.xOffset, charData.texture.orig.width);
+      pos.x += charData.xAdvance + this._letterSpacing;
+      maxLineHeight = Math.max(maxLineHeight, charData.yOffset + charData.texture.height);
+      prevCharCode = charCode;
+      if (lastBreakPos !== -1 && maxWidth > 0 && pos.x > maxWidth) {
+        ++spacesRemoved;
+        removeItems(chars, 1 + lastBreakPos - spacesRemoved, 1 + i - lastBreakPos);
+        i = lastBreakPos;
+        lastBreakPos = -1;
+        lineWidths.push(lastBreakWidth);
+        lineSpaces.push(chars.length > 0 ? chars[chars.length - 1].prevSpaces : 0);
+        maxLineWidth = Math.max(maxLineWidth, lastBreakWidth);
+        line++;
+        pos.x = 0;
+        pos.y += data.lineHeight;
+        prevCharCode = null;
+        spaceCount = 0;
+      }
+    }
+    const lastChar = charsInput[charsInput.length - 1];
+    if (lastChar !== "\r" && lastChar !== "\n") {
+      if (/(?:\s)/.test(lastChar)) {
+        lastLineWidth = lastBreakWidth;
+      }
+      lineWidths.push(lastLineWidth);
+      maxLineWidth = Math.max(maxLineWidth, lastLineWidth);
+      lineSpaces.push(-1);
+    }
+    const lineAlignOffsets = [];
+    for (let i = 0; i <= line; i++) {
+      let alignOffset = 0;
+      if (this._align === "right") {
+        alignOffset = maxLineWidth - lineWidths[i];
+      } else if (this._align === "center") {
+        alignOffset = (maxLineWidth - lineWidths[i]) / 2;
+      } else if (this._align === "justify") {
+        alignOffset = lineSpaces[i] < 0 ? 0 : (maxLineWidth - lineWidths[i]) / lineSpaces[i];
+      }
+      lineAlignOffsets.push(alignOffset);
+    }
+    const lenChars = chars.length;
+    const pagesMeshData = {};
+    const newPagesMeshData = [];
+    const activePagesMeshData = this._activePagesMeshData;
+    pageMeshDataPool.push(...activePagesMeshData);
+    for (let i = 0; i < lenChars; i++) {
+      const texture = chars[i].texture;
+      const baseTextureUid = texture.baseTexture.uid;
+      if (!pagesMeshData[baseTextureUid]) {
+        let pageMeshData = pageMeshDataPool.pop();
+        if (!pageMeshData) {
+          const geometry = new MeshGeometry();
+          let material;
+          let meshBlendMode;
+          if (data.distanceFieldType === "none") {
+            material = new MeshMaterial(Texture.EMPTY);
+            meshBlendMode = BLEND_MODES.NORMAL;
+          } else {
+            material = new MeshMaterial(Texture.EMPTY, { program: Program.from(msdfVert, msdfFrag), uniforms: { uFWidth: 0 } });
+            meshBlendMode = BLEND_MODES.NORMAL_NPM;
+          }
+          const mesh = new Mesh(geometry, material);
+          mesh.blendMode = meshBlendMode;
+          pageMeshData = {
+            index: 0,
+            indexCount: 0,
+            vertexCount: 0,
+            uvsCount: 0,
+            total: 0,
+            mesh,
+            vertices: null,
+            uvs: null,
+            indices: null
+          };
+        }
+        pageMeshData.index = 0;
+        pageMeshData.indexCount = 0;
+        pageMeshData.vertexCount = 0;
+        pageMeshData.uvsCount = 0;
+        pageMeshData.total = 0;
+        const { _textureCache } = this;
+        _textureCache[baseTextureUid] = _textureCache[baseTextureUid] || new Texture(texture.baseTexture);
+        pageMeshData.mesh.texture = _textureCache[baseTextureUid];
+        pageMeshData.mesh.tint = this._tintColor.value;
+        newPagesMeshData.push(pageMeshData);
+        pagesMeshData[baseTextureUid] = pageMeshData;
+      }
+      pagesMeshData[baseTextureUid].total++;
+    }
+    for (let i = 0; i < activePagesMeshData.length; i++) {
+      if (!newPagesMeshData.includes(activePagesMeshData[i])) {
+        this.removeChild(activePagesMeshData[i].mesh);
+      }
+    }
+    for (let i = 0; i < newPagesMeshData.length; i++) {
+      if (newPagesMeshData[i].mesh.parent !== this) {
+        this.addChild(newPagesMeshData[i].mesh);
+      }
+    }
+    this._activePagesMeshData = newPagesMeshData;
+    for (const i in pagesMeshData) {
+      const pageMeshData = pagesMeshData[i];
+      const total = pageMeshData.total;
+      if (!(pageMeshData.indices?.length > 6 * total) || pageMeshData.vertices.length < Mesh.BATCHABLE_SIZE * 2) {
+        pageMeshData.vertices = new Float32Array(4 * 2 * total);
+        pageMeshData.uvs = new Float32Array(4 * 2 * total);
+        pageMeshData.indices = new Uint16Array(6 * total);
+      } else {
+        const total2 = pageMeshData.total;
+        const vertices = pageMeshData.vertices;
+        for (let i2 = total2 * 4 * 2; i2 < vertices.length; i2++) {
+          vertices[i2] = 0;
+        }
+      }
+      pageMeshData.mesh.size = 6 * total;
+    }
+    for (let i = 0; i < lenChars; i++) {
+      const char = chars[i];
+      let offset = char.position.x + lineAlignOffsets[char.line] * (this._align === "justify" ? char.prevSpaces : 1);
+      if (this._roundPixels) {
+        offset = Math.round(offset);
+      }
+      const xPos = offset * scale;
+      const yPos = char.position.y * scale;
+      const texture = char.texture;
+      const pageMesh = pagesMeshData[texture.baseTexture.uid];
+      const textureFrame = texture.frame;
+      const textureUvs = texture._uvs;
+      const index = pageMesh.index++;
+      pageMesh.indices[index * 6 + 0] = 0 + index * 4;
+      pageMesh.indices[index * 6 + 1] = 1 + index * 4;
+      pageMesh.indices[index * 6 + 2] = 2 + index * 4;
+      pageMesh.indices[index * 6 + 3] = 0 + index * 4;
+      pageMesh.indices[index * 6 + 4] = 2 + index * 4;
+      pageMesh.indices[index * 6 + 5] = 3 + index * 4;
+      pageMesh.vertices[index * 8 + 0] = xPos;
+      pageMesh.vertices[index * 8 + 1] = yPos;
+      pageMesh.vertices[index * 8 + 2] = xPos + textureFrame.width * scale;
+      pageMesh.vertices[index * 8 + 3] = yPos;
+      pageMesh.vertices[index * 8 + 4] = xPos + textureFrame.width * scale;
+      pageMesh.vertices[index * 8 + 5] = yPos + textureFrame.height * scale;
+      pageMesh.vertices[index * 8 + 6] = xPos;
+      pageMesh.vertices[index * 8 + 7] = yPos + textureFrame.height * scale;
+      pageMesh.uvs[index * 8 + 0] = textureUvs.x0;
+      pageMesh.uvs[index * 8 + 1] = textureUvs.y0;
+      pageMesh.uvs[index * 8 + 2] = textureUvs.x1;
+      pageMesh.uvs[index * 8 + 3] = textureUvs.y1;
+      pageMesh.uvs[index * 8 + 4] = textureUvs.x2;
+      pageMesh.uvs[index * 8 + 5] = textureUvs.y2;
+      pageMesh.uvs[index * 8 + 6] = textureUvs.x3;
+      pageMesh.uvs[index * 8 + 7] = textureUvs.y3;
+    }
+    this._textWidth = maxLineWidth * scale;
+    this._textHeight = (pos.y + data.lineHeight) * scale;
+    for (const i in pagesMeshData) {
+      const pageMeshData = pagesMeshData[i];
+      if (this.anchor.x !== 0 || this.anchor.y !== 0) {
+        let vertexCount = 0;
+        const anchorOffsetX = this._textWidth * this.anchor.x;
+        const anchorOffsetY = this._textHeight * this.anchor.y;
+        for (let i2 = 0; i2 < pageMeshData.total; i2++) {
+          pageMeshData.vertices[vertexCount++] -= anchorOffsetX;
+          pageMeshData.vertices[vertexCount++] -= anchorOffsetY;
+          pageMeshData.vertices[vertexCount++] -= anchorOffsetX;
+          pageMeshData.vertices[vertexCount++] -= anchorOffsetY;
+          pageMeshData.vertices[vertexCount++] -= anchorOffsetX;
+          pageMeshData.vertices[vertexCount++] -= anchorOffsetY;
+          pageMeshData.vertices[vertexCount++] -= anchorOffsetX;
+          pageMeshData.vertices[vertexCount++] -= anchorOffsetY;
+        }
+      }
+      this._maxLineHeight = maxLineHeight * scale;
+      const vertexBuffer = pageMeshData.mesh.geometry.getBuffer("aVertexPosition");
+      const textureBuffer = pageMeshData.mesh.geometry.getBuffer("aTextureCoord");
+      const indexBuffer = pageMeshData.mesh.geometry.getIndex();
+      vertexBuffer.data = pageMeshData.vertices;
+      textureBuffer.data = pageMeshData.uvs;
+      indexBuffer.data = pageMeshData.indices;
+      vertexBuffer.update();
+      textureBuffer.update();
+      indexBuffer.update();
+    }
+    for (let i = 0; i < chars.length; i++) {
+      charRenderDataPool.push(chars[i]);
+    }
+    this._font = data;
+    this.dirty = false;
+  }
+  updateTransform() {
+    this.validate();
+    this.containerUpdateTransform();
+  }
+  _render(renderer) {
+    if (this._autoResolution && this._resolution !== renderer.resolution) {
+      this._resolution = renderer.resolution;
+      this.dirty = true;
+    }
+    const { distanceFieldRange, distanceFieldType, size } = BitmapFont.available[this._fontName];
+    if (distanceFieldType !== "none") {
+      const { a, b, c, d } = this.worldTransform;
+      const dx = Math.sqrt(a * a + b * b);
+      const dy = Math.sqrt(c * c + d * d);
+      const worldScale = (Math.abs(dx) + Math.abs(dy)) / 2;
+      const fontScale = this.fontSize / size;
+      const resolution = renderer._view.resolution;
+      for (const mesh of this._activePagesMeshData) {
+        mesh.mesh.shader.uniforms.uFWidth = worldScale * distanceFieldRange * fontScale * resolution;
+      }
+    }
+    super._render(renderer);
+  }
+  getLocalBounds() {
+    this.validate();
+    return super.getLocalBounds();
+  }
+  validate() {
+    const font = BitmapFont.available[this._fontName];
+    if (!font) {
+      throw new Error(`Missing BitmapFont "${this._fontName}"`);
+    }
+    if (this._font !== font) {
+      this.dirty = true;
+    }
+    if (this.dirty) {
+      this.updateText();
+    }
+  }
+  get tint() {
+    return this._tintColor.value;
+  }
+  set tint(value) {
+    if (this.tint === value)
+      return;
+    this._tintColor.setValue(value);
+    for (let i = 0; i < this._activePagesMeshData.length; i++) {
+      this._activePagesMeshData[i].mesh.tint = value;
+    }
+  }
+  get align() {
+    return this._align;
+  }
+  set align(value) {
+    if (this._align !== value) {
+      this._align = value;
+      this.dirty = true;
+    }
+  }
+  get fontName() {
+    return this._fontName;
+  }
+  set fontName(value) {
+    if (!BitmapFont.available[value]) {
+      throw new Error(`Missing BitmapFont "${value}"`);
+    }
+    if (this._fontName !== value) {
+      this._fontName = value;
+      this.dirty = true;
+    }
+  }
+  get fontSize() {
+    return this._fontSize ?? BitmapFont.available[this._fontName].size;
+  }
+  set fontSize(value) {
+    if (this._fontSize !== value) {
+      this._fontSize = value;
+      this.dirty = true;
+    }
+  }
+  get anchor() {
+    return this._anchor;
+  }
+  set anchor(value) {
+    if (typeof value === "number") {
+      this._anchor.set(value);
+    } else {
+      this._anchor.copyFrom(value);
+    }
+  }
+  get text() {
+    return this._text;
+  }
+  set text(text) {
+    text = String(text === null || text === void 0 ? "" : text);
+    if (this._text === text) {
+      return;
+    }
+    this._text = text;
+    this.dirty = true;
+  }
+  get maxWidth() {
+    return this._maxWidth;
+  }
+  set maxWidth(value) {
+    if (this._maxWidth === value) {
+      return;
+    }
+    this._maxWidth = value;
+    this.dirty = true;
+  }
+  get maxLineHeight() {
+    this.validate();
+    return this._maxLineHeight;
+  }
+  get textWidth() {
+    this.validate();
+    return this._textWidth;
+  }
+  get letterSpacing() {
+    return this._letterSpacing;
+  }
+  set letterSpacing(value) {
+    if (this._letterSpacing !== value) {
+      this._letterSpacing = value;
+      this.dirty = true;
+    }
+  }
+  get roundPixels() {
+    return this._roundPixels;
+  }
+  set roundPixels(value) {
+    if (value !== this._roundPixels) {
+      this._roundPixels = value;
+      this.dirty = true;
+    }
+  }
+  get textHeight() {
+    this.validate();
+    return this._textHeight;
+  }
+  get resolution() {
+    return this._resolution;
+  }
+  set resolution(value) {
+    this._autoResolution = false;
+    if (this._resolution === value) {
+      return;
+    }
+    this._resolution = value;
+    this.dirty = true;
+  }
+  destroy(options) {
+    const { _textureCache } = this;
+    const data = BitmapFont.available[this._fontName];
+    const pageMeshDataPool = data.distanceFieldType === "none" ? pageMeshDataDefaultPageMeshData : pageMeshDataMSDFPageMeshData;
+    pageMeshDataPool.push(...this._activePagesMeshData);
+    for (const pageMeshData of this._activePagesMeshData) {
+      this.removeChild(pageMeshData.mesh);
+    }
+    this._activePagesMeshData = [];
+    pageMeshDataPool.filter((page) => _textureCache[page.mesh.texture.baseTexture.uid]).forEach((page) => {
+      page.mesh.texture = Texture.EMPTY;
+    });
+    for (const id in _textureCache) {
+      const texture = _textureCache[id];
+      texture.destroy();
+      delete _textureCache[id];
+    }
+    this._font = null;
+    this._tintColor = null;
+    this._textureCache = null;
+    super.destroy(options);
+  }
+};
+let BitmapText = _BitmapText;
+BitmapText.styleDefaults = {
+  align: "left",
+  tint: 16777215,
+  maxWidth: 0,
+  letterSpacing: 0
+};
+
+const validExtensions = [".xml", ".fnt"];
+const loadBitmapFont = {
+  extension: {
+    type: ExtensionType.LoadParser,
+    priority: LoaderParserPriority.Normal
+  },
+  name: "loadBitmapFont",
+  test(url) {
+    return validExtensions.includes(path.extname(url).toLowerCase());
+  },
+  async testParse(data) {
+    return TextFormat.test(data) || XMLStringFormat.test(data);
+  },
+  async parse(asset, data, loader) {
+    const fontData = TextFormat.test(asset) ? TextFormat.parse(asset) : XMLStringFormat.parse(asset);
+    const { src } = data;
+    const { page: pages } = fontData;
+    const textureUrls = [];
+    for (let i = 0; i < pages.length; ++i) {
+      const pageFile = pages[i].file;
+      let imagePath = path.join(path.dirname(src), pageFile);
+      imagePath = copySearchParams(imagePath, src);
+      textureUrls.push(imagePath);
+    }
+    const loadedTextures = await loader.load(textureUrls);
+    const textures = textureUrls.map((url) => loadedTextures[url]);
+    return BitmapFont.install(fontData, textures, true);
+  },
+  async load(url, _options) {
+    const response = await settings.ADAPTER.fetch(url);
+    return response.text();
+  },
+  unload(bitmapFont) {
+    bitmapFont.destroy();
+  }
+};
+extensions$1.add(loadBitmapFont);
+
+const _HTMLTextStyle = class extends TextStyle {
+  constructor() {
+    super(...arguments);
+    this._fonts = [];
+    this._overrides = [];
+    this._stylesheet = "";
+    this.fontsDirty = false;
+  }
+  static from(originalStyle) {
+    return new _HTMLTextStyle(Object.keys(_HTMLTextStyle.defaultOptions).reduce((obj, prop) => ({ ...obj, [prop]: originalStyle[prop] }), {}));
+  }
+  cleanFonts() {
+    if (this._fonts.length > 0) {
+      this._fonts.forEach((font) => {
+        URL.revokeObjectURL(font.src);
+        font.refs--;
+        if (font.refs === 0) {
+          if (font.fontFace) {
+            document.fonts.delete(font.fontFace);
+          }
+          delete _HTMLTextStyle.availableFonts[font.originalUrl];
+        }
+      });
+      this.fontFamily = "Arial";
+      this._fonts.length = 0;
+      this.styleID++;
+      this.fontsDirty = true;
+    }
+  }
+  loadFont(url, options = {}) {
+    const { availableFonts } = _HTMLTextStyle;
+    if (availableFonts[url]) {
+      const font = availableFonts[url];
+      this._fonts.push(font);
+      font.refs++;
+      this.styleID++;
+      this.fontsDirty = true;
+      return Promise.resolve();
+    }
+    return settings.ADAPTER.fetch(url).then((response) => response.blob()).then(async (blob) => new Promise((resolve, reject) => {
+      const src = URL.createObjectURL(blob);
+      const reader = new FileReader();
+      reader.onload = () => resolve([src, reader.result]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    })).then(async ([src, dataSrc]) => {
+      const font = Object.assign({
+        family: path.basename(url, path.extname(url)),
+        weight: "normal",
+        style: "normal",
+        src,
+        dataSrc,
+        refs: 1,
+        originalUrl: url,
+        fontFace: null
+      }, options);
+      availableFonts[url] = font;
+      this._fonts.push(font);
+      this.styleID++;
+      const fontFace = new FontFace(font.family, `url(${font.src})`, {
+        weight: font.weight,
+        style: font.style
+      });
+      font.fontFace = fontFace;
+      await fontFace.load();
+      document.fonts.add(fontFace);
+      await document.fonts.ready;
+      this.styleID++;
+      this.fontsDirty = true;
+    });
+  }
+  addOverride(...value) {
+    const toAdd = value.filter((v) => !this._overrides.includes(v));
+    if (toAdd.length > 0) {
+      this._overrides.push(...toAdd);
+      this.styleID++;
+    }
+  }
+  removeOverride(...value) {
+    const toRemove = value.filter((v) => this._overrides.includes(v));
+    if (toRemove.length > 0) {
+      this._overrides = this._overrides.filter((v) => !toRemove.includes(v));
+      this.styleID++;
+    }
+  }
+  toCSS(scale) {
+    return [
+      `transform: scale(${scale})`,
+      `transform-origin: top left`,
+      "display: inline-block",
+      `color: ${this.normalizeColor(this.fill)}`,
+      `font-size: ${this.fontSize}px`,
+      `font-family: ${this.fontFamily}`,
+      `font-weight: ${this.fontWeight}`,
+      `font-style: ${this.fontStyle}`,
+      `font-variant: ${this.fontVariant}`,
+      `letter-spacing: ${this.letterSpacing}px`,
+      `text-align: ${this.align}`,
+      `padding: ${this.padding}px`,
+      `white-space: ${this.whiteSpace}`,
+      ...this.lineHeight ? [`line-height: ${this.lineHeight}px`] : [],
+      ...this.wordWrap ? [
+        `word-wrap: ${this.breakWords ? "break-all" : "break-word"}`,
+        `max-width: ${this.wordWrapWidth}px`
+      ] : [],
+      ...this.strokeThickness ? [
+        `-webkit-text-stroke-width: ${this.strokeThickness}px`,
+        `-webkit-text-stroke-color: ${this.normalizeColor(this.stroke)}`,
+        `text-stroke-width: ${this.strokeThickness}px`,
+        `text-stroke-color: ${this.normalizeColor(this.stroke)}`,
+        "paint-order: stroke"
+      ] : [],
+      ...this.dropShadow ? [this.dropShadowToCSS()] : [],
+      ...this._overrides
+    ].join(";");
+  }
+  toGlobalCSS() {
+    return this._fonts.reduce((result, font) => `${result}
+            @font-face {
+                font-family: "${font.family}";
+                src: url('${font.dataSrc}');
+                font-weight: ${font.weight};
+                font-style: ${font.style}; 
+            }`, this._stylesheet);
+  }
+  get stylesheet() {
+    return this._stylesheet;
+  }
+  set stylesheet(value) {
+    if (this._stylesheet !== value) {
+      this._stylesheet = value;
+      this.styleID++;
+    }
+  }
+  normalizeColor(color) {
+    if (Array.isArray(color)) {
+      color = rgb2hex(color);
+    }
+    if (typeof color === "number") {
+      return hex2string(color);
+    }
+    return color;
+  }
+  dropShadowToCSS() {
+    let color = this.normalizeColor(this.dropShadowColor);
+    const alpha = this.dropShadowAlpha;
+    const x = Math.round(Math.cos(this.dropShadowAngle) * this.dropShadowDistance);
+    const y = Math.round(Math.sin(this.dropShadowAngle) * this.dropShadowDistance);
+    if (color.startsWith("#") && alpha < 1) {
+      color += (alpha * 255 | 0).toString(16).padStart(2, "0");
+    }
+    const position = `${x}px ${y}px`;
+    if (this.dropShadowBlur > 0) {
+      return `text-shadow: ${position} ${this.dropShadowBlur}px ${color}`;
+    }
+    return `text-shadow: ${position} ${color}`;
+  }
+  reset() {
+    Object.assign(this, _HTMLTextStyle.defaultOptions);
+  }
+  onBeforeDraw() {
+    const { fontsDirty: prevFontsDirty } = this;
+    this.fontsDirty = false;
+    if (this.isSafari && this._fonts.length > 0 && prevFontsDirty) {
+      return new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return Promise.resolve();
+  }
+  get isSafari() {
+    const { userAgent } = settings.ADAPTER.getNavigator();
+    return /^((?!chrome|android).)*safari/i.test(userAgent);
+  }
+  set fillGradientStops(_value) {
+    console.warn("[HTMLTextStyle] fillGradientStops is not supported by HTMLText");
+  }
+  get fillGradientStops() {
+    return super.fillGradientStops;
+  }
+  set fillGradientType(_value) {
+    console.warn("[HTMLTextStyle] fillGradientType is not supported by HTMLText");
+  }
+  get fillGradientType() {
+    return super.fillGradientType;
+  }
+  set miterLimit(_value) {
+    console.warn("[HTMLTextStyle] miterLimit is not supported by HTMLText");
+  }
+  get miterLimit() {
+    return super.miterLimit;
+  }
+  set trim(_value) {
+    console.warn("[HTMLTextStyle] trim is not supported by HTMLText");
+  }
+  get trim() {
+    return super.trim;
+  }
+  set textBaseline(_value) {
+    console.warn("[HTMLTextStyle] textBaseline is not supported by HTMLText");
+  }
+  get textBaseline() {
+    return super.textBaseline;
+  }
+  set leading(_value) {
+    console.warn("[HTMLTextStyle] leading is not supported by HTMLText");
+  }
+  get leading() {
+    return super.leading;
+  }
+  set lineJoin(_value) {
+    console.warn("[HTMLTextStyle] lineJoin is not supported by HTMLText");
+  }
+  get lineJoin() {
+    return super.lineJoin;
+  }
+};
+let HTMLTextStyle = _HTMLTextStyle;
+HTMLTextStyle.availableFonts = {};
+HTMLTextStyle.defaultOptions = {
+  align: "left",
+  breakWords: false,
+  dropShadow: false,
+  dropShadowAlpha: 1,
+  dropShadowAngle: Math.PI / 6,
+  dropShadowBlur: 0,
+  dropShadowColor: "black",
+  dropShadowDistance: 5,
+  fill: "black",
+  fontFamily: "Arial",
+  fontSize: 26,
+  fontStyle: "normal",
+  fontVariant: "normal",
+  fontWeight: "normal",
+  letterSpacing: 0,
+  lineHeight: 0,
+  padding: 0,
+  stroke: "black",
+  strokeThickness: 0,
+  whiteSpace: "normal",
+  wordWrap: false,
+  wordWrapWidth: 100
+};
+
+const _HTMLText = class extends Sprite {
+  constructor(text = "", style = {}) {
+    super(Texture.EMPTY);
+    this._text = null;
+    this._style = null;
+    this._autoResolution = true;
+    this._loading = false;
+    this.localStyleID = -1;
+    this.dirty = false;
+    this.ownsStyle = false;
+    const image = new Image();
+    const texture = Texture.from(image, {
+      scaleMode: settings.SCALE_MODE,
+      resourceOptions: {
+        autoLoad: false
+      }
+    });
+    texture.orig = new Rectangle();
+    texture.trim = new Rectangle();
+    this.texture = texture;
+    const nssvg = "http://www.w3.org/2000/svg";
+    const nsxhtml = "http://www.w3.org/1999/xhtml";
+    const svgRoot = document.createElementNS(nssvg, "svg");
+    const foreignObject = document.createElementNS(nssvg, "foreignObject");
+    const domElement = document.createElementNS(nsxhtml, "div");
+    const styleElement = document.createElementNS(nsxhtml, "style");
+    foreignObject.setAttribute("width", "10000");
+    foreignObject.setAttribute("height", "10000");
+    foreignObject.style.overflow = "hidden";
+    svgRoot.appendChild(foreignObject);
+    this.maxWidth = _HTMLText.defaultMaxWidth;
+    this.maxHeight = _HTMLText.defaultMaxHeight;
+    this._domElement = domElement;
+    this._styleElement = styleElement;
+    this._svgRoot = svgRoot;
+    this._foreignObject = foreignObject;
+    this._foreignObject.appendChild(styleElement);
+    this._foreignObject.appendChild(domElement);
+    this._image = image;
+    this._loadImage = new Image();
+    this._autoResolution = _HTMLText.defaultAutoResolution;
+    this._resolution = _HTMLText.defaultResolution ?? settings.RESOLUTION;
+    this.text = text;
+    this.style = style;
+  }
+  measureText(overrides) {
+    const { text, style, resolution } = Object.assign({
+      text: this._text,
+      style: this._style,
+      resolution: this._resolution
+    }, overrides);
+    Object.assign(this._domElement, {
+      innerHTML: text,
+      style: style.toCSS(resolution)
+    });
+    this._styleElement.textContent = style.toGlobalCSS();
+    document.body.appendChild(this._svgRoot);
+    const contentBounds = this._domElement.getBoundingClientRect();
+    this._svgRoot.remove();
+    const contentWidth = Math.min(this.maxWidth, Math.ceil(contentBounds.width));
+    const contentHeight = Math.min(this.maxHeight, Math.ceil(contentBounds.height));
+    this._svgRoot.setAttribute("width", contentWidth.toString());
+    this._svgRoot.setAttribute("height", contentHeight.toString());
+    if (text !== this._text) {
+      this._domElement.innerHTML = this._text;
+    }
+    if (style !== this._style) {
+      Object.assign(this._domElement, { style: this._style?.toCSS(resolution) });
+      this._styleElement.textContent = this._style?.toGlobalCSS();
+    }
+    return {
+      width: contentWidth + style.padding * 2,
+      height: contentHeight + style.padding * 2
+    };
+  }
+  async updateText(respectDirty = true) {
+    const { style, _image: image, _loadImage: loadImage } = this;
+    if (this.localStyleID !== style.styleID) {
+      this.dirty = true;
+      this.localStyleID = style.styleID;
+    }
+    if (!this.dirty && respectDirty) {
+      return;
+    }
+    const { width, height } = this.measureText();
+    image.width = loadImage.width = Math.ceil(Math.max(1, width));
+    image.height = loadImage.height = Math.ceil(Math.max(1, height));
+    if (!this._loading) {
+      this._loading = true;
+      await new Promise((resolve) => {
+        loadImage.onload = async () => {
+          await style.onBeforeDraw();
+          this._loading = false;
+          image.src = loadImage.src;
+          loadImage.onload = null;
+          loadImage.src = "";
+          this.updateTexture();
+          resolve();
+        };
+        const svgURL = new XMLSerializer().serializeToString(this._svgRoot);
+        loadImage.src = `data:image/svg+xml;charset=utf8,${encodeURIComponent(svgURL)}`;
+      });
+    }
+  }
+  get source() {
+    return this._image;
+  }
+  updateTexture() {
+    const { style, texture, _image: image, resolution } = this;
+    const { padding } = style;
+    const { baseTexture } = texture;
+    texture.trim.width = texture._frame.width = image.width / resolution;
+    texture.trim.height = texture._frame.height = image.height / resolution;
+    texture.trim.x = -padding;
+    texture.trim.y = -padding;
+    texture.orig.width = texture._frame.width - padding * 2;
+    texture.orig.height = texture._frame.height - padding * 2;
+    this._onTextureUpdate();
+    baseTexture.setRealSize(image.width, image.height, resolution);
+    this.dirty = false;
+  }
+  _render(renderer) {
+    if (this._autoResolution && this._resolution !== renderer.resolution) {
+      this._resolution = renderer.resolution;
+      this.dirty = true;
+    }
+    this.updateText(true);
+    super._render(renderer);
+  }
+  _renderCanvas(renderer) {
+    if (this._autoResolution && this._resolution !== renderer.resolution) {
+      this._resolution = renderer.resolution;
+      this.dirty = true;
+    }
+    this.updateText(true);
+    super._renderCanvas(renderer);
+  }
+  getLocalBounds(rect) {
+    this.updateText(true);
+    return super.getLocalBounds(rect);
+  }
+  _calculateBounds() {
+    this.updateText(true);
+    this.calculateVertices();
+    this._bounds.addQuad(this.vertexData);
+  }
+  _onStyleChange() {
+    this.dirty = true;
+  }
+  destroy(options) {
+    if (typeof options === "boolean") {
+      options = { children: options };
+    }
+    options = Object.assign({}, _HTMLText.defaultDestroyOptions, options);
+    super.destroy(options);
+    const forceClear = null;
+    if (this.ownsStyle) {
+      this._style?.cleanFonts();
+    }
+    this._style = forceClear;
+    this._svgRoot?.remove();
+    this._svgRoot = forceClear;
+    this._domElement?.remove();
+    this._domElement = forceClear;
+    this._foreignObject?.remove();
+    this._foreignObject = forceClear;
+    this._styleElement?.remove();
+    this._styleElement = forceClear;
+    this._loadImage.src = "";
+    this._loadImage.onload = null;
+    this._loadImage = forceClear;
+    this._image.src = "";
+    this._image = forceClear;
+  }
+  get width() {
+    this.updateText(true);
+    return Math.abs(this.scale.x) * this._image.width / this.resolution;
+  }
+  set width(value) {
+    this.updateText(true);
+    const s = sign(this.scale.x) || 1;
+    this.scale.x = s * value / this._image.width / this.resolution;
+    this._width = value;
+  }
+  get height() {
+    this.updateText(true);
+    return Math.abs(this.scale.y) * this._image.height / this.resolution;
+  }
+  set height(value) {
+    this.updateText(true);
+    const s = sign(this.scale.y) || 1;
+    this.scale.y = s * value / this._image.height / this.resolution;
+    this._height = value;
+  }
+  get style() {
+    return this._style;
+  }
+  set style(style) {
+    if (this._style === style) {
+      return;
+    }
+    style = style || {};
+    if (style instanceof HTMLTextStyle) {
+      this.ownsStyle = false;
+      this._style = style;
+    } else if (style instanceof TextStyle) {
+      console.warn("[HTMLText] Cloning TextStyle, if this is not what you want, use HTMLTextStyle");
+      this.ownsStyle = true;
+      this._style = HTMLTextStyle.from(style);
+    } else {
+      this.ownsStyle = true;
+      this._style = new HTMLTextStyle(style);
+    }
+    this.localStyleID = -1;
+    this.dirty = true;
+  }
+  get text() {
+    return this._text;
+  }
+  set text(text) {
+    text = String(text === "" || text === null || text === void 0 ? " " : text);
+    text = this.sanitiseText(text);
+    if (this._text === text) {
+      return;
+    }
+    this._text = text;
+    this.dirty = true;
+  }
+  get resolution() {
+    return this._resolution;
+  }
+  set resolution(value) {
+    this._autoResolution = false;
+    if (this._resolution === value) {
+      return;
+    }
+    this._resolution = value;
+    this.dirty = true;
+  }
+  sanitiseText(text) {
+    return text.replace(/<br>/gi, "<br/>").replace(/<hr>/gi, "<hr/>").replace(/&nbsp;/gi, "&#160;");
+  }
+};
+let HTMLText = _HTMLText;
+HTMLText.defaultDestroyOptions = {
+  texture: true,
+  children: false,
+  baseTexture: true
+};
+HTMLText.defaultMaxWidth = 2024;
+HTMLText.defaultMaxHeight = 2024;
+HTMLText.defaultAutoResolution = true;
+
+/**
+ * Extends the pixi sprite class to include a Matter body and its properties.
+ */
+var PhysicsSprite = /*#__PURE__*/function (_Sprite) {
+  _inherits(PhysicsSprite, _Sprite);
+  var _super = _createSuper(PhysicsSprite);
+  /**
+   * @param {Texture} texture The texture of the sprite.
+   * @param {SpriteOptions} spriteOptions The options to define the initial properties of the sprite.
+   * @param {PhysicsOptions} physicsOptions The options to apply to the sprite's body.
+   */
+  function PhysicsSprite(texture) {
+    var _this;
+    var spriteOptions = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+    var physicsOptions = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+    _classCallCheck(this, PhysicsSprite);
+    _this = _super.call(this, texture);
+    /**
+     * A reference to the physics options for this sprite's body.
+     *
+     * @property {IBodyDefinition}
+     */
+    _defineProperty(_assertThisInitialized(_this), "physicsOptions", void 0);
+    /**
+     * The physics body of the sprite.
+     *
+     * @private
+     *
+     * @property {Body}
+     */
+    _defineProperty(_assertThisInitialized(_this), "_body", void 0);
+    _this.anchor.x = 0.5;
+    _this.anchor.y = 0.5;
+    _this.position.x = spriteOptions.x || 0;
+    _this.position.y = spriteOptions.y || 0;
+    if (spriteOptions.width) _this.width = spriteOptions.width;
+    if (spriteOptions.height) _this.height = spriteOptions.height;
+    _this.physicsOptions = physicsOptions;
+    if (spriteOptions.isCircle) _this._body = matterExports.Bodies.circle(_this.x, _this.y, _this.width, _this.physicsOptions);else _this._body = matterExports.Bodies.rectangle(_this.x, _this.y, _this.width, _this.height, _this.physicsOptions);
+    return _this;
+  }
+
+  /**
+   * Returns the physics body of the sprite.
+   *
+   * @returns {Body}
+   */
+  _createClass(PhysicsSprite, [{
+    key: "body",
+    get: function get() {
+      return this._body;
+    }
+
+    /**
+     * Updates the position of the sprite according to where its body should be.
+     */
+  }, {
+    key: "update",
+    value: function update() {
+      this.position.x = this._body.position.x;
+      this.position.y = this._body.position.y;
+      this.rotation = this._body.angle;
+    }
+  }]);
+  return PhysicsSprite;
+}(Sprite);
 
 // Fix for issue with pixi throwing an error if there's a global pixi object
 // and we try to extend the Graphics module.

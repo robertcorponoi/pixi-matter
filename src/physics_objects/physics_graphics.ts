@@ -1,6 +1,6 @@
 "use strict";
 
-import { Graphics } from "@pixi/graphics";
+import { Graphics } from "pixi.js";
 import { Body, Bodies, IBodyDefinition } from "matter-js";
 import { GraphicsOptions } from "../interfaces/graphics_options";
 

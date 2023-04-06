@@ -1,5 +1,4 @@
-import { Sprite } from "@pixi/sprite";
-import { Texture } from "@pixi/core";
+import { Sprite, Texture } from "pixi.js";
 import { Body, IBodyDefinition } from "matter-js";
 import { SpriteOptions } from "../interfaces/sprite_options";
 /**
