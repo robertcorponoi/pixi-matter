@@ -25909,6 +25909,7 @@ Graphics._TEMP_POINT = new Point();
 
 // Fix for issue with pixi throwing an error if there's a global pixi object
 // and we try to extend the Graphics module.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 var GraphicsObject = window.PIXI ? window.PIXI.Graphics : Graphics;
 
