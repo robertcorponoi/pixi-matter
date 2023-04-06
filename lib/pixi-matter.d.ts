@@ -1,6 +1,6 @@
-import { Engine } from 'matter-js';
-import { PhysicsSprite } from './physics_objects/physics_sprite';
-import { PhysicsGraphics } from './physics_objects/physics_graphics';
+import { Engine } from "matter-js";
+import { PhysicsSprite } from "./physics_objects/physics_sprite";
+import { PhysicsGraphics } from "./physics_objects/physics_graphics";
 /**
  * Manages pixi objects within the Matter engine.
  */

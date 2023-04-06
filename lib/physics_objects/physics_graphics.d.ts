@@ -1,5 +1,5 @@
-import { Body, IBodyDefinition } from 'matter-js';
-import { GraphicsOptions } from '../interfaces/graphics_options';
+import { Body, IBodyDefinition } from "matter-js";
+import { GraphicsOptions } from "../interfaces/graphics_options";
 declare const GraphicsObject: any;
 /**
  * Represents a rectangular or circular shape with a physics body attached to

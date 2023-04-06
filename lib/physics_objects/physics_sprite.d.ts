@@ -1,7 +1,7 @@
-import { Sprite } from '@pixi/sprite';
-import { Texture } from '@pixi/core';
-import { Body, IBodyDefinition } from 'matter-js';
-import { SpriteOptions } from '../interfaces/sprite_options';
+import { Sprite } from "@pixi/sprite";
+import { Texture } from "@pixi/core";
+import { Body, IBodyDefinition } from "matter-js";
+import { SpriteOptions } from "../interfaces/sprite_options";
 /**
  * Extends the pixi sprite class to include a Matter body and its properties.
  */
