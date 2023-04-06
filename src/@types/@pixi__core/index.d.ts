@@ -1,4 +1,3 @@
-declare module '@pixi/core' {
-  export class Texture {
-  }
+declare module "@pixi/core" {
+    export class Texture {}
 }
