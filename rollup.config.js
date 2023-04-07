@@ -1,23 +1,12 @@
-import pkg from "./package.json";
-import babel from "@rollup/plugin-babel";
-import commonjs from "@rollup/plugin-commonjs";
-import resolve from "@rollup/plugin-node-resolve";
-
-const extensions = [".js", ".jsx", ".ts", ".tsx"];
+import typescript from "@rollup/plugin-typescript";
 
 export default {
     input: "./src/index.ts",
-    external: [],
-    plugins: [
-        resolve({ extensions, preferBuiltins: false }),
-        commonjs(),
-        babel({ extensions, include: ["src/**/*"], babelHelpers: "bundled" }),
-    ],
-
-    output: [
-        {
-            file: pkg.module,
-            format: "esm",
-        },
-    ],
+    output: {
+        dir: "dist",
+        format: "esm",
+        sourcemap: true,
+    },
+    external: ["pixi.js", "matter-js"],
+    plugins: [typescript()],
 };

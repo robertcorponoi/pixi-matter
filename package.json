@@ -2,38 +2,39 @@
     "name": "pixi-matter",
     "version": "0.1.0",
     "description": "Easily create pixi sprites and graphics objects with matter physics bodies",
-    "main": "index.js",
-    "module": "pixi-matter.js",
-    "typings": "lib/index.ts",
-    "scripts": {
-        "rm:build": "rm -rf lib",
-        "rm:bundle": "rm -rf pixi-matter.js",
-        "type-check": "tsc --noEmit",
-        "type-check:watch": "npm run type-check -- --watch",
-        "build": "npm run rm:build && npm run build:types && npm run build:js",
-        "build:types": "tsc --emitDeclarationOnly",
-        "build:js": "babel src --out-dir lib --extensions \".ts,.tsx\" --source-maps inline",
-        "bundle": "npm run rm:bundle && rollup -c --bundleConfigAsCjs",
-        "bundle:watch": "rollup -c --bundleConfigAsCjs --watch",
-        "examples": "node examples/server.js",
-        "prepare": "npm run build && npm run bundle"
-    },
+    "author": "Robert Corponoi",
+    "license": "MIT",
     "repository": {
         "type": "git",
         "url": "git@github.com:robertcorponoi/pixi-matter.git"
     },
     "keywords": [
-        "pixi",
         "pixi.js",
-        "matter",
-        "matter-js",
-        "physics",
-        "sprite",
-        "sprites",
-        "graphics"
+        "matter-js"
     ],
-    "author": "Robert Corponoi",
-    "license": "MIT",
+    "type": "module",
+    "exports": {
+        ".": {
+            "import": {
+                "types": "./dist/index.d.ts",
+                "default": "./dist/index.js"
+            }
+        }
+    },
+    "files": [
+        "/dist",
+        "README.md",
+        "LICENSE"
+    ],
+    "engines": {
+        "node": ">=14.16"
+    },
+    "scripts": {
+        "build": "rollup -c rollup.config.js",
+        "build:watch": "rollup -c rollup.config.js --watch",
+        "prepare": "if [ ! -d 'dist' ]; then npm run build; fi",
+        "pretest": "npm run build"
+    },
     "devDependencies": {
         "@babel/cli": "^7.12.8",
         "@babel/core": "^7.12.9",
