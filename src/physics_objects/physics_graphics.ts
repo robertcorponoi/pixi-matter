@@ -2,7 +2,7 @@
 
 import { Graphics } from "pixi.js";
 import { Body, Bodies, IBodyDefinition } from "matter-js";
-import { GraphicsOptions } from "../interfaces/graphics_options";
+import { GraphicsOptions } from "../interfaces/graphics_options.js";
 
 // Fix for issue with pixi throwing an error if there's a global pixi object
 // and we try to extend the Graphics module.
