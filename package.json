@@ -36,17 +36,7 @@
         "pretest": "npm run build"
     },
     "devDependencies": {
-        "@babel/cli": "^7.12.8",
-        "@babel/core": "^7.12.9",
-        "@babel/plugin-proposal-class-properties": "^7.12.1",
-        "@babel/plugin-proposal-numeric-separator": "^7.12.7",
-        "@babel/plugin-proposal-object-rest-spread": "^7.12.1",
-        "@babel/preset-env": "^7.12.7",
-        "@babel/preset-typescript": "^7.12.7",
         "@fastify/static": "^6.10.0",
-        "@rollup/plugin-babel": "^6.0.3",
-        "@rollup/plugin-commonjs": "^24.0.1",
-        "@rollup/plugin-node-resolve": "^15.0.2",
         "@rollup/plugin-typescript": "^11.1.0",
         "@types/matter-js": "^0.18.2",
         "@typescript-eslint/eslint-plugin": "^5.57.1",
